@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Environment / secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Data
+data/raw/*
+data/interim/*
+data/processed/*
+
+# Keep directory structure
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
+# Models / checkpoints
+models/*
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Outputs
+outputs/logs/*
+outputs/predictions/*
+
+# Cache
+.cache/
+wandb/
+runs/

@@ -253,3 +253,82 @@ The next critical unknown is proposal recall in actual 960x540 camera views.
 Proceed with pretrained proposal-generation screening, followed by DINO classification and temporal tracking if proposal recall is adequate.
 
 ---
+
+# EXP-D004 — YOLO11n generic proposal recall at Level 0
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+A COCO-pretrained lightweight YOLO model may provide useful class-agnostic proposals even though Drone Flyby classes do not align with COCO labels.
+
+**Change:**  
+Ran pretrained `yolo11n.pt` on simulated Level 0 960x540 views and ignored predicted semantic classes. Measured whether any proposal overlapped each GT object.
+
+**Validation:**  
+All 259 Helsinki GT boxes.
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+### Confidence 0.001
+
+- Mean proposals/frame: 253.7
+- Median proposals/frame: 294
+- Median latency: 19.0 ms
+- p95 latency: 241.9 ms
+- Proposal recall @ IoU 0.30: 0.0347
+- Proposal recall @ IoU 0.50: 0.0193
+
+### Confidence 0.01
+
+- Mean proposals/frame: 35.8
+- Median proposals/frame: 35
+- Median latency: 18.3 ms
+- p95 latency: 25.7 ms
+- Proposal recall @ IoU 0.30: 0.0193
+- Proposal recall @ IoU 0.50: 0.0154
+
+### Confidence 0.05
+
+- Mean proposals/frame: 4.4
+- Median proposals/frame: 4
+- Median latency: 18.1 ms
+- p95 latency: 18.7 ms
+- Proposal recall @ IoU 0.30: 0.0077
+- Proposal recall @ IoU 0.50: 0.0077
+
+### Per-class proposal recall at conf=0.001
+
+| Class | IoU@0.30 | IoU@0.50 |
+|---|---:|---:|
+| condor | 0.000 | 0.000 |
+| hangar | 0.833 | 0.833 |
+| helicopter | 0.000 | 0.000 |
+| jammer | 0.000 | 0.000 |
+| jet_plane | 0.000 | 0.000 |
+| large_launcher | 0.160 | 0.000 |
+| large_tower | 0.000 | 0.000 |
+| medium_launcher | 0.000 | 0.000 |
+| medium_plane | 0.000 | 0.000 |
+| mine_roller | 0.000 | 0.000 |
+| small_launcher | 0.000 | 0.000 |
+| small_plane | 0.000 | 0.000 |
+| small_tower | 0.000 | 0.000 |
+| spacecraft | 0.000 | 0.000 |
+| ta-ta | 0.000 | 0.000 |
+| tank | 0.000 | 0.000 |
+
+**Interpretation:**  
+Generic COCO objectness fails almost completely on this domain. Only the hangar is reliably localized; 14/16 classes have zero proposal recall even at an extremely permissive confidence threshold. The failure is therefore structural, not a confidence-threshold tuning problem.
+
+Steady-state inference itself is fast (~19 ms), but useful recall would require hundreds of proposals per frame and is still only 1.9% at IoU 0.50.
+
+**Decision:** DISCARD
+
+Do not spend competition time tuning generic COCO YOLO as the primary proposal mechanism.
+
+---

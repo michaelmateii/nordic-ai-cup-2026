@@ -7,6 +7,11 @@ from src.utils.DTOs import ActionRequest
 # Per-agent memory.
 AGENT_MEMORY = {}
 
+
+def reset_policy_state():
+    AGENT_MEMORY.clear()
+
+
 STUCK_STEPS = 12
 MIN_PROGRESS = 2.0
 
@@ -42,12 +47,12 @@ def action_decision(
     rng: random.Random,
 ):
     """
-    EXP-S004
+    EXP-S005
 
-    S003 + stuck detection.
+    S004 + survival-first lineage strategy.
 
-    If an agent repeatedly sees fruit but fails to get closer,
-    temporarily stop chasing it and perform an escape turn.
+    Reduce unnecessary reproduction and spawn mainly to preserve
+    the lineage or when energy surplus is very high.
     """
 
     agent_id = observation_response["agent_id"]

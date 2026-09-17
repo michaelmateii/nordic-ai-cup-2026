@@ -7,6 +7,11 @@ from src.utils.DTOs import ActionRequest
 # Per-agent memory.
 AGENT_MEMORY = {}
 
+
+def reset_policy_state():
+    AGENT_MEMORY.clear()
+
+
 STUCK_STEPS = 12
 MIN_PROGRESS = 2.0
 
@@ -42,12 +47,12 @@ def action_decision(
     rng: random.Random,
 ):
     """
-    EXP-S004
+    EXP-S006
 
-    S003 + stuck detection.
+    S005 + predator-facing escape strategy.
 
-    If an agent repeatedly sees fruit but fails to get closer,
-    temporarily stop chasing it and perform an escape turn.
+    Move away from predators while facing them at exploitable
+    distances to influence predator chase behaviour.
     """
 
     agent_id = observation_response["agent_id"]

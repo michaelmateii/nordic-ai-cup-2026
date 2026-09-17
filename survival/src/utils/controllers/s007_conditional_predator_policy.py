@@ -47,12 +47,13 @@ def action_decision(
     rng: random.Random,
 ):
     """
-    EXP-S004
+    EXP-S007
 
-    S003 + stuck detection.
+    S005 + conditional predator manipulation.
 
-    If an agent repeatedly sees fruit but fails to get closer,
-    temporarily stop chasing it and perform an escape turn.
+    Use direct escape for immediate danger,
+    use predator-facing manipulation only when conditions are favorable,
+    otherwise prioritize food and normal navigation.
     """
 
     agent_id = observation_response["agent_id"]
@@ -81,39 +82,84 @@ def action_decision(
     move_direction = 0.0
     turn_angle = 0.0
 
-    # -------------------------------------------------
-    # 1. Predator avoidance always has highest priority.
-    # -------------------------------------------------
-    if predators:
-        nearest_predator = min(
+    nearest_predator = (
+        min(
             predators,
             key=lambda obs: obs["distance"],
         )
+        if predators
+        else None
+    )
 
+    nearest_fruit = (
+        min(
+            fruits,
+            key=lambda obs: obs["distance"],
+        )
+        if fruits
+        else None
+    )
+
+    # -------------------------------------------------
+    # 1. Immediate danger
+    # -------------------------------------------------
+
+    if (
+        nearest_predator is not None
+        and nearest_predator["distance"] <= 95
+    ):
         predator_angle = nearest_predator["angle"]
-        predator_distance = nearest_predator["distance"]
 
         flee_angle = normalize_angle(
             predator_angle + math.pi
         )
 
         move_direction = flee_angle
+        move_distance = sprint_speed
 
+        # Keep predator roughly in front while escaping.
         turn_angle = clamp(
-            flee_angle,
-            -math.pi / 6,
-            math.pi / 6,
+            predator_angle,
+            -math.pi / 2,
+            math.pi / 2,
         )
-
-        if predator_distance < 100:
-            move_distance = sprint_speed
 
         memory["stuck_counter"] = 0
         memory["last_fruit_distance"] = None
 
     # -------------------------------------------------
-    # 2. Escape mode.
+    # 2. Conditional predator manipulation
     # -------------------------------------------------
+
+    elif (
+        nearest_predator is not None
+        and nearest_predator["distance"] <= 180
+        and energy >= 0.55 * max_energy
+    ):
+        predator_angle = nearest_predator["angle"]
+
+        flee_angle = normalize_angle(
+            predator_angle + math.pi
+        )
+
+        # Walk away...
+        move_direction = flee_angle
+        move_distance = speed
+
+        # ...while facing predator.
+        turn_angle = clamp(
+            predator_angle,
+            -math.pi / 3,
+            math.pi / 3,
+        )
+
+        memory["stuck_counter"] = 0
+        memory["last_fruit_distance"] = None
+
+    # -------------------------------------------------
+    # 3. Escape mode from stuck detection
+    # -------------------------------------------------
+
     elif memory["escape_steps"] > 0:
         move_direction = memory["escape_direction"]
 
@@ -126,42 +172,47 @@ def action_decision(
         memory["escape_steps"] -= 1
 
     # -------------------------------------------------
-    # 3. Fruit seeking.
+    # 4. Food seeking
+    #
+    # Distant predators are deliberately ignored here.
     # -------------------------------------------------
-    elif fruits:
-        target = min(
-            fruits,
-            key=lambda obs: obs["distance"],
-        )
 
-        target_distance = target["distance"]
-        target_angle = target["angle"]
+    elif nearest_fruit is not None:
+        target_distance = nearest_fruit["distance"]
+        target_angle = nearest_fruit["angle"]
 
         previous_distance = memory["last_fruit_distance"]
 
         if previous_distance is not None:
-            progress = previous_distance - target_distance
+            progress = (
+                previous_distance
+                - target_distance
+            )
 
             if progress < MIN_PROGRESS:
                 memory["stuck_counter"] += 1
             else:
                 memory["stuck_counter"] = 0
 
-        memory["last_fruit_distance"] = target_distance
+        memory["last_fruit_distance"] = (
+            target_distance
+        )
 
-        # If we're repeatedly failing to get closer,
-        # abandon the current trajectory temporarily.
         if memory["stuck_counter"] >= STUCK_STEPS:
-            escape_direction = rng.choice([-1.0, 1.0]) * (
-                math.pi / 2
+            escape_direction = (
+                rng.choice([-1.0, 1.0])
+                * math.pi / 2
             )
 
-            memory["escape_direction"] = escape_direction
+            memory["escape_direction"] = (
+                escape_direction
+            )
             memory["escape_steps"] = 15
             memory["stuck_counter"] = 0
             memory["last_fruit_distance"] = None
 
             move_direction = escape_direction
+
             turn_angle = clamp(
                 escape_direction,
                 -math.pi / 4,
@@ -178,13 +229,13 @@ def action_decision(
             )
 
     # -------------------------------------------------
-    # 4. Exploration when no food is sensed.
+    # 5. Exploration
     # -------------------------------------------------
+
     else:
         memory["last_fruit_distance"] = None
         memory["stuck_counter"] = 0
 
-        # Stronger exploration than S002/S003.
         if rng.random() < 0.15:
             turn_angle = rng.uniform(
                 -math.pi / 3,
@@ -192,14 +243,35 @@ def action_decision(
             )
 
     # -------------------------------------------------
-    # Reproduction.
+    # Survival-first reproduction.
+    #
+    # Score depends mainly on keeping the lineage alive,
+    # not on maintaining a large population.
+    #
+    # Reproduce mainly when:
+    #   1. the agent is getting old, or
+    #   2. it has a very large energy surplus.
     # -------------------------------------------------
-    spawn_threshold = max(
-        250.0,
-        0.65 * max_energy,
+
+    age = observation_response["age"]
+
+    old_age_threshold = 55.0
+
+    high_energy_threshold = max(
+        400.0,
+        0.85 * max_energy,
     )
 
-    spawn_agent = energy >= spawn_threshold
+    spawn_agent = (
+        (
+            age >= old_age_threshold
+            and energy >= 180.0
+        )
+        or
+        (
+            energy >= high_energy_threshold
+        )
+    )
 
     return ActionRequest(
         agent_id=agent_id,

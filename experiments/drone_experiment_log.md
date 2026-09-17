@@ -2215,3 +2215,307 @@ The next step is not to train immediately, but to quantitatively test whether a 
 **KEEP**
 
 Proceed to EXP-D027B leave-one-seed-out propagation benchmark.
+
+---
+
+# EXP-D027B — Manual-seed temporal propagation benchmark
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+Real-validation manual seeds should be substantially easier to propagate to nearby validation frames than Helsinki-derived templates because both source and target come from the same domain and sequence.
+
+## Data
+
+Manual validation seeds from EXP-D027A:
+
+- total annotations: 23
+- labeled frames: 18
+
+Corrected class distribution:
+
+- helicopter: 2
+- large_launcher: 2
+- large_tower: 6
+- medium_launcher: 1
+- medium_plane: 2
+- mine_roller: 2
+- tank: 8
+
+Classes with at least two seeds were evaluated pairwise.
+
+## Change
+
+For every ordered pair of manually labeled boxes from the same class:
+
+- use one seed crop as a template
+- search the other seed frame
+- multi-scale normalized cross-correlation
+- scales: 0.70–1.30
+- compare predicted box with manual target box
+- success criterion: IoU >= 0.50
+
+Results were stratified by temporal distance.
+
+## Results
+
+### Temporal propagation
+
+| Maximum frame gap | Pairs | R@IoU0.50 | Median IoU | Median NCC |
+|---|---:|---:|---:|---:|
+| 15 | 12 | **0.667** | **0.686** | **0.966** |
+| 30 | 20 | **0.550** | **0.511** | **0.943** |
+| 60 | 42 | 0.262 | 0.000 | 0.850 |
+| all | 94 | 0.128 | 0.000 | 0.836 |
+
+### All-pair class results
+
+| Class | Pairs | R@IoU0.50 | Median IoU |
+|---|---:|---:|---:|
+| helicopter | 2 | 0.000 | 0.000 |
+| large_launcher | 2 | 0.000 | 0.000 |
+| large_tower | 30 | 0.100 | 0.000 |
+| medium_plane | 2 | 0.000 | 0.218 |
+| mine_roller | 2 | 0.000 | 0.147 |
+| tank | 56 | 0.161 | 0.000 |
+
+## Interpretation
+
+Global template re-identification across the full validation sequence is unreliable.
+
+However, propagation over short temporal distances is substantially stronger:
+
+- gap <= 15: 66.7% success at IoU >= 0.50
+- median IoU 0.686
+- median NCC 0.966
+
+Performance degrades rapidly as temporal distance increases.
+
+This indicates that the useful structure is not class-level template matching but **local same-instance propagation through nearby validation frames**.
+
+The poor all-pair per-class numbers are therefore not a reason to discard propagation; they are primarily caused by attempting to match the same class across distant views where appearance, location and potentially physical instance differ substantially.
+
+## Decision
+
+**KEEP — LOCAL PROPAGATION ONLY**
+
+Do not perform unrestricted full-sequence matching.
+
+Next step:
+
+EXP-D027C — calibrate propagation confidence using manually labeled pairs, then pseudo-label only high-confidence matches within a short temporal window.
+
+---
+
+# EXP-D027C — Local propagation confidence calibration
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+Propagation confidence can be calibrated from manually labeled validation seed pairs so that pseudo-label generation favors precision rather than recall.
+
+## Data
+
+Source:
+
+`drone/artifacts/exp_d027b/propagation_benchmark.json`
+
+Propagation pairs were stratified by:
+
+- temporal gap
+- normalized cross-correlation confidence
+- IoU against manual validation boxes
+
+Success criterion:
+
+- IoU >= 0.50
+
+## Results
+
+### Gap <= 10
+
+| NCC threshold | N | P@IoU0.50 | Median IoU |
+|---|---:|---:|---:|
+| 0.80 | 10 | 0.800 | 0.723 |
+| 0.85 | 10 | 0.800 | 0.723 |
+| 0.90 | 8 | **0.875** | **0.737** |
+| 0.92 | 7 | 0.857 | 0.754 |
+| 0.94 | 7 | 0.857 | 0.754 |
+| 0.95 | 7 | 0.857 | 0.754 |
+| 0.96 | 7 | 0.857 | 0.754 |
+| 0.97 | 3 | 0.667 | 0.633 |
+| 0.98 | 1 | 1.000 | 0.633 |
+
+### Gap <= 15
+
+Identical to gap <= 10 for the available manually labeled pairs:
+
+- NCC >= 0.90: 8 pairs
+- P@IoU0.50: **0.875**
+- Median IoU: **0.737**
+
+### Gap <= 20
+
+At NCC >= 0.90:
+
+- N: 12
+- P@IoU0.50: 0.750
+- Median IoU: 0.642
+
+### Gap <= 30
+
+At NCC >= 0.90:
+
+- N: 12
+- P@IoU0.50: 0.750
+- Median IoU: 0.642
+
+## Per-class local calibration
+
+### tank
+
+At gap <= 15:
+
+- NCC >= 0.90: 6 / 6 correct
+- P@IoU0.50: **1.000**
+- Median IoU: **0.754**
+
+The same six examples remain correct through NCC >= 0.96.
+
+### large_tower
+
+At gap <= 15:
+
+- NCC >= 0.90: 1 / 1 correct
+- IoU: 0.721
+
+Sample size is too small for a strong class-level conclusion.
+
+### medium_plane
+
+At gap <= 15:
+
+- NCC >= 0.90–0.97: 1 example
+- IoU: 0.436
+- propagation failure despite high NCC
+
+This demonstrates that NCC confidence alone is not sufficient for every class.
+
+## Interpretation
+
+The useful operating region is a **short temporal window**, not an extremely high NCC threshold.
+
+For the available validation seeds:
+
+- gap <= 10–15 is materially safer than gap 20–30
+- NCC >= 0.90 provides the best observed precision/sample tradeoff
+- increasing NCC above ~0.96 removes many examples without improving reliability
+- reliability differs strongly by class
+
+Therefore pseudo-label generation should use:
+
+1. short temporal distance
+2. NCC >= 0.90
+3. forward/backward cycle consistency
+4. class-specific trust
+5. manual audit before training
+
+## Decision
+
+**KEEP**
+
+Proceed to EXP-D027D.
+
+Initial trusted classes:
+
+- tank
+- large_tower
+
+Other seeded classes remain audit-only until more evidence exists.
+
+---
+
+# EXP-D027D — Cycle-consistent validation pseudo-label propagation
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+High-confidence manual validation seeds can be expanded into additional real-domain labels using short-range same-center template propagation, provided that candidates satisfy forward/backward cycle consistency.
+
+## Configuration
+
+Propagation parameters:
+
+- maximum temporal gap: 10 frames
+- forward NCC threshold: 0.90
+- scale search: 0.80, 0.90, 1.00, 1.10, 1.20
+- exact L1 camera-center match required
+- backward consistency required
+- minimum cycle IoU: 0.50
+
+Initial trusted classes:
+
+- tank
+- large_tower
+
+Other classes were retained as audit-only.
+
+## Results
+
+- Raw forward matches: **58**
+- Cycle-consistent matches: **57**
+- Deduplicated pseudo-labels: **54**
+- Trusted pseudo-labels: **37**
+- Audit-only pseudo-labels: **17**
+
+Per class:
+
+| Class | Pseudo-labels | Status |
+|---|---:|---|
+| helicopter | 7 | AUDIT |
+| large_launcher | 2 | AUDIT |
+| large_tower | 12 | TRUST |
+| medium_launcher | 2 | AUDIT |
+| medium_plane | 2 | AUDIT |
+| mine_roller | 4 | AUDIT |
+| tank | 25 | TRUST |
+
+## Visual audit
+
+The cycle-consistent montage is substantially cleaner than previous automated localization experiments.
+
+Trusted tank and large-tower matches generally correspond to coherent repeated target-like objects rather than generic background texture.
+
+Several audit-only helicopter matches are also visually strong and appear to correspond to the intended object.
+
+This is qualitatively different from EXP-D023–D026A, where automated matches were dominated by unrelated background structure.
+
+## Interpretation
+
+Within-validation same-instance propagation is viable.
+
+Cycle consistency removes most weak one-way matches while preserving many strong nearby matches.
+
+The remaining uncertainty is now primarily semantic/class-specific rather than localization failure.
+
+The correct next step is a lightweight human audit of the 54 propagated labels before using them as training data.
+
+## Decision
+
+**KEEP**
+
+Proceed to EXP-D027E:
+
+- manually accept/reject propagated labels
+- merge accepted labels with manual seeds
+- create a clean validation-domain training set
+- only then train a real-domain detector

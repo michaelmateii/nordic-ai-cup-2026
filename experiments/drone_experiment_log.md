@@ -936,3 +936,39 @@ Retain DINOv2 as a reference recognizer and potential occasional high-confidence
 
 ---
 
+---
+
+# EXP-D013 — Lightweight MobileNetV3 crop recognizer
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+Drone target recognition is sufficiently easy that a lightweight ImageNet-pretrained classifier can replace DINOv2-small with minimal accuracy loss and substantially lower latency.
+
+**Change:**  
+Train `mobilenetv3_small_100` as a 16-class crop classifier using Level 0 padded GT crops from frames 0–20.
+
+Validation uses GT crops from frames 22–24.
+
+Primary purpose is recognizer feasibility and speed, not cross-scene accuracy.
+
+**Validation:**  
+- crop classification accuracy
+- later: classification of actual EXP-D011 predicted boxes
+- batched inference latency
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+**Results:**  
+TBD
+
+**Interpretation:**  
+TBD
+
+**Decision:**  
+TBD
+
+---

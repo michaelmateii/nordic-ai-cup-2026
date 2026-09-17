@@ -2519,3 +2519,120 @@ Proceed to EXP-D027E:
 - merge accepted labels with manual seeds
 - create a clean validation-domain training set
 - only then train a real-domain detector
+
+---
+
+# EXP-D027E — Human audit of cycle-consistent pseudo-labels
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+Cycle-consistent short-range propagation from manually labeled validation seeds produces pseudo-labels clean enough to use as real-domain supervision after lightweight human verification.
+
+## Input
+
+EXP-D027D generated:
+
+- raw forward matches: 58
+- cycle-consistent matches: 57
+- deduplicated pseudo-labels: 54
+
+Pseudo-label classes:
+
+- helicopter
+- large_launcher
+- large_tower
+- medium_launcher
+- medium_plane
+- mine_roller
+- tank
+
+## Change
+
+All 54 cycle-consistent pseudo-labels were manually reviewed.
+
+A label was accepted only when:
+
+- the semantic class was correct
+- the propagated bounding box correctly localized the object
+
+Uncertain or incorrect examples were rejected.
+
+## Results
+
+- Reviewed: **54 / 54**
+- Accepted: **53**
+- Rejected: **1**
+- Acceptance rate: **98.1%**
+
+Accepted per class:
+
+| Class | Accepted pseudo-labels |
+|---|---:|
+| helicopter | 7 |
+| large_launcher | 2 |
+| large_tower | 12 |
+| medium_launcher | 2 |
+| medium_plane | 2 |
+| mine_roller | 3 |
+| tank | 25 |
+
+Combining manual seeds and accepted propagated labels gives up to:
+
+- 23 manual real-domain boxes
+- 53 accepted propagated boxes
+- **76 real-validation annotations before overlap/deduplication**
+
+## Interpretation
+
+Short-range validation-to-validation propagation is highly reliable when constrained by:
+
+- small temporal gap
+- same L1 camera center
+- NCC filtering
+- forward/backward cycle consistency
+- manual verification
+
+The 98.1% acceptance rate is dramatically better than all Helsinki-to-validation transfer approaches.
+
+This establishes real-validation annotation + local propagation as the primary adaptation strategy.
+
+The remaining major weakness is **class coverage**.
+
+Current real-domain labels cover only seven of sixteen classes:
+
+- helicopter
+- large_launcher
+- large_tower
+- medium_launcher
+- medium_plane
+- mine_roller
+- tank
+
+Nine classes remain without validation-domain supervision:
+
+- condor
+- hangar
+- jammer
+- jet_plane
+- small_launcher
+- small_plane
+- small_tower
+- spacecraft
+- ta-ta
+
+Because competition mAP is macro-averaged across classes, leaving nine classes uncovered is unacceptable.
+
+## Decision
+
+**KEEP — PRIMARY REAL-DOMAIN LABEL GENERATION METHOD**
+
+Next:
+
+1. merge manual and accepted propagated labels into one canonical real-domain annotation set
+2. perform a second targeted manual pass focused only on the nine missing classes
+3. propagate any new high-confidence seeds locally
+4. then train the first validation-domain detector

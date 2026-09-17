@@ -936,8 +936,6 @@ Retain DINOv2 as a reference recognizer and potential occasional high-confidence
 
 ---
 
----
-
 # EXP-D013 — Lightweight MobileNetV3 crop recognizer
 
 **Status:** RUNNING
@@ -972,3 +970,93 @@ TBD
 TBD
 
 ---
+
+## Results
+
+- Best epoch: 15
+- Best validation crop accuracy: 0.9630
+- Model: `mobilenetv3_small_100`
+- Training crops: 222
+- Temporal holdout crops: 27
+
+Best checkpoint:
+
+`drone/artifacts/exp_d013/classifier/mobilenetv3_small_best.pt`
+
+**Interpretation:**  
+A lightweight ImageNet-pretrained MobileNetV3-Small classifier achieves 96.3% accuracy on the temporal GT-crop holdout, very close to the frozen DINOv2 results.
+
+This suggests that Drone Flyby semantic recognition does not require a heavy embedding backbone once localization is provided.
+
+The decisive next test is classification of actual EXP-D011 predicted boxes and full pipeline AP/latency.
+
+**Decision:** KEEP
+
+---
+
+# EXP-D014 — Tiled YOLO + MobileNetV3 realtime pipeline
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+MobileNetV3-Small can replace DINOv2-small with minimal AP loss while reducing recognition latency enough to keep the complete pipeline below the ~333 ms realtime frame interval.
+
+**Change:**  
+Same EXP-D012 detector pipeline:
+- matched 2x2 tiled YOLO11n
+- conf=0.005
+- map + NMS proposals
+- 30% padded crops
+
+Replace DINOv2 recognition with a batched `mobilenetv3_small_100` 16-class classifier trained in EXP-D013.
+
+**Validation:**  
+Temporal holdout frames 22–24.
+
+Metrics:
+- macro mAP@0.50
+- per-class AP@0.50
+- detector latency
+- batched classifier latency
+- complete frame latency
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+- Macro mAP@0.50: 0.7141
+- Mean proposals/frame: 23.0
+
+### Per-class AP@0.50
+
+| Class | AP@0.50 |
+|---|---:|
+| hangar | 0.4673 |
+| jet_plane | 1.0000 |
+| large_launcher | 1.0000 |
+| large_tower | 1.0000 |
+| medium_launcher | 0.5050 |
+| medium_plane | 0.1683 |
+| small_launcher | 1.0000 |
+| spacecraft | 0.0000 |
+| ta-ta | 1.0000 |
+| tank | 1.0000 |
+
+### Latency
+
+- YOLO median: 88.5 ms
+- MobileNet batch median: 220.0 ms
+- Total median: 320.9 ms
+- Total max: 455.2 ms
+
+**Interpretation:**  
+MobileNetV3-Small preserves and slightly improves semantic scoring relative to DINOv2 while reducing median total latency from 389 ms to approximately 321 ms.
+
+However, runtime remains too close to the 333 ms frame interval, and the 455 ms maximum implies that realtime evaluation may still skip frames.
+
+The unexpectedly high MobileNet MPS latency suggests device-launch/synchronization overhead rather than model complexity may dominate. Before changing architecture, benchmark MobileNet on CPU versus MPS and at smaller input resolutions.
+
+**Decision:** KEEP score pipeline / OPTIMIZE runtime.

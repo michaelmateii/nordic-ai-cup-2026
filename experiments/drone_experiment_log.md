@@ -2852,3 +2852,97 @@ Proceed to EXP-D028C:
 - generate cycle-consistent candidates from the expanded 44-seed set
 - retain all other propagated classes as human-audit-only
 - do not automatically trust jet_plane despite high NCC
+
+---
+
+# EXP-D028C — Expanded cycle-consistent pseudo-label generation
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+The expanded 44-seed validation annotation set can generate substantially more real-domain pseudo-labels while preserving the high precision observed in EXP-D027D/E.
+
+## Configuration
+
+Validation sequence:
+
+`3224a582bfbf4273a028497662b7aa7c`
+
+Manual seeds:
+
+- 44 annotations
+- 27 labeled frames
+- 11 / 16 classes covered
+
+Propagation:
+
+- L1 views only
+- maximum temporal gap: 10
+- same camera center required
+- forward NCC >= 0.90
+- multi-scale template search
+- backward match required
+- cycle IoU >= 0.50
+- deduplication at IoU >= 0.50
+
+Trusted classes:
+
+- tank
+- large_tower
+- small_tower
+
+All remaining propagated classes were retained as audit-only.
+
+## Results
+
+- L1 frames available: **194**
+- Manual seeds: **44**
+- Raw forward matches: **97**
+- Cycle-consistent matches: **93**
+- Deduplicated pseudo-labels: **82**
+- Trusted pseudo-labels: **46**
+- Audit-only pseudo-labels: **36**
+
+Per class:
+
+| Class | Candidates | Status |
+|---|---:|---|
+| hangar | 3 | AUDIT |
+| helicopter | 7 | AUDIT |
+| jet_plane | 6 | AUDIT |
+| large_launcher | 2 | AUDIT |
+| large_tower | 12 | TRUST |
+| medium_launcher | 2 | AUDIT |
+| medium_plane | 2 | AUDIT |
+| mine_roller | 4 | AUDIT |
+| small_plane | 10 | AUDIT |
+| small_tower | 9 | TRUST |
+| tank | 25 | TRUST |
+
+## Interpretation
+
+Expanding the real-validation seed set materially increased candidate coverage:
+
+- EXP-D027D: 54 candidates
+- EXP-D028C: 82 candidates
+
+Cycle consistency continues to reject very few high-NCC local candidates, while the trusted-class subset remains visually coherent.
+
+Small_tower is now behaving comparably to tank and large_tower and remains appropriate for trusted propagation.
+
+Jet_plane and small_plane generate useful-looking candidates but cannot be automatically trusted because previous pairwise calibration showed substantial instance confusion.
+
+## Decision
+
+**KEEP**
+
+Proceed to EXP-D028D:
+
+- manually review all 82 pseudo-labels
+- accept only labels with correct class and localization
+- merge accepted pseudo-labels with the 44 manual seeds
+- deduplicate the canonical real-domain annotation set
+- then train the first real-validation-domain detector

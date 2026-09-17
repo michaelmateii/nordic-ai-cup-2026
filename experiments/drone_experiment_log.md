@@ -496,3 +496,147 @@ Zoom may still be valuable for localization and confidence, but current evidence
 Retain DINOv2-small as the leading class-recognition method. Shift experiment budget toward task-specific localization.
 
 ---
+
+# EXP-D007 — Task-specific one-class YOLO localization
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+Pooling all 16 Drone Flyby classes into one task-specific `target` category will provide substantially better localization than generic COCO objectness. DINOv2 can handle semantic classification separately.
+
+**Change:**  
+Construct Level 0 960x540 YOLO dataset with every labeled Drone object mapped to a single `target` class.
+
+Temporal split:
+- train: frames 0–20
+- gap: frame 21
+- validation: frames 22–24
+
+The split was revised before training because the initial temporal holdout placed `hangar` and `medium_plane` entirely outside the training set. The revised split keeps every validation target morphology represented at least once in training while retaining a one-frame temporal gap.
+
+Expected dataset inventory:
+- train: 21 frames / 222 boxes
+- validation: 3 frames / 27 boxes
+
+Late-appearing classes remain scarce:
+- hangar: 2 training appearances
+- medium_plane: 1 training appearance
+
+This remains a same-identity temporal feasibility screen, not a cross-scene generalization estimate.
+
+**Validation:**  
+Temporal Helsinki holdout. This contains the same physical identities and therefore measures temporal/viewpoint generalization rather than cross-scene generalization.
+
+Primary metrics:
+- box recall
+- mAP@0.50
+- inference latency
+- per-original-class localization recall via separate evaluator after training
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Training results
+
+Training stopped by early stopping after 44 epochs.
+
+- Best epoch: 29
+- Validation images: 3
+- Validation instances: 27
+- Precision: 0.983
+- Recall: 0.407
+- mAP@0.50: 0.435
+- mAP@0.50:0.95: 0.228
+
+### M1 validation speed
+
+- Preprocess: 0.6 ms/image
+- Inference: 187.6 ms/image
+- Postprocess: 7.4 ms/image
+
+Best checkpoint:
+
+`drone/artifacts/exp_d007/runs/yolo11n_objectness/weights/best.pt`
+
+**Interpretation:**  
+Task-specific one-class fine-tuning substantially outperforms generic COCO objectness, proving that the supplied labeled sequence contains enough signal to learn Drone-specific localization.
+
+At the default validation operating point, the model is extremely precise (0.983) but recall is only 0.407. Because downstream DINOv2 recognition can reject false proposals, precision is less important than proposal recall for our intended two-stage system.
+
+Inference is approximately 188 ms on the M1, leaving limited but usable room within the ~333 ms frame interval. Deployment latency will need explicit benchmarking with DINO and API overhead.
+
+**Decision:** INVESTIGATE
+
+Before retraining, sweep low confidence thresholds on `best.pt` and measure proposal recall by original Drone class.
+
+---
+
+---
+
+# EXP-D008 — Low-confidence task-specific proposal sweep
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+EXP-D007's very high precision and moderate recall may reflect an overly conservative confidence operating point. Lower thresholds could make the trained one-class detector useful as a high-recall proposal generator for downstream DINOv2 classification.
+
+**Change:**  
+Swept EXP-D007 `best.pt` over confidence thresholds 0.001–0.25.
+
+**Validation:**  
+1. All 25 Helsinki frames — diagnostic, heavily in-sample.
+2. Temporal holdout frames 22–24 — primary screen.
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+| Conf | Mean proposals/frame | Median latency | Holdout recall @0.30 | Holdout recall @0.50 |
+|---:|---:|---:|---:|---:|
+| 0.001 | 300.0 | 19.9 ms | 0.5185 | 0.4815 |
+| 0.005 | 300.0 | 17.8 ms | 0.5185 | 0.4815 |
+| 0.010 | 79.2 | 17.6 ms | 0.4815 | 0.4815 |
+| 0.025 | 20.0 | 17.5 ms | 0.4074 | 0.4074 |
+| 0.050 | 11.7 | 17.5 ms | 0.4074 | 0.4074 |
+| 0.100 | 8.3 | 17.7 ms | 0.4074 | 0.4074 |
+| 0.250 | 6.2 | 17.7 ms | 0.3704 | 0.3704 |
+
+### Diagnostic all-frame result at conf=0.01
+
+- Recall @ IoU 0.30: 0.6988
+- Recall @ IoU 0.50: 0.6795
+
+### Holdout per-class recall at most permissive operating point
+
+| Class | IoU@0.30 | IoU@0.50 |
+|---|---:|---:|
+| hangar | 0.000 | 0.000 |
+| jet_plane | 1.000 | 1.000 |
+| large_launcher | 1.000 | 1.000 |
+| large_tower | 0.667 | 0.333 |
+| medium_launcher | 0.000 | 0.000 |
+| medium_plane | 1.000 | 1.000 |
+| small_launcher | 0.000 | 0.000 |
+| spacecraft | 0.000 | 0.000 |
+| ta-ta | 0.000 | 0.000 |
+| tank | 1.000 | 1.000 |
+
+**Interpretation:**  
+Lowering confidence does not solve the main recall problem. Below approximately 0.01 the detector rapidly saturates the 300-detection cap without discovering additional holdout targets.
+
+`conf=0.01` is currently the best practical proposal operating point: it preserves the maximum observed IoU@0.50 holdout recall of 0.4815 while reducing proposal count from 300 to approximately 79/frame.
+
+The failure is highly class-dependent. Several medium/large classes localize reliably, while small launcher, spacecraft, ta-ta and other small/late target morphologies are entirely missed.
+
+This strongly suggests spatial resolution / feature-map scale is now more important than confidence tuning.
+
+Direct warmed inference is ~18 ms on M1, substantially lower than the post-training Ultralytics validation timing.
+
+**Decision:** KEEP
+
+Retain task-specific YOLO as the leading localization baseline. Test spatial tiling before additional training.

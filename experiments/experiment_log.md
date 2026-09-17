@@ -443,3 +443,79 @@
 **Decision:** DISCARD. Do not run full benchmark.
 
 ---
+
+## EXP-S015 — Automated S007 parameter search
+
+**Challenge:** Survival Simulator
+
+**Hypothesis:** S007's structure is strong, but its predator and exploration thresholds may not be optimal.
+
+**Parameters searched:**
+- immediate predator distance
+- predator manipulation distance
+- predator manipulation energy ratio
+- exploration probability
+
+**Stage 1:** 12 configurations screened on seeds 202, 404, 606.
+
+Best apparent candidates:
+1. energy_045
+2. combo_aggressive
+3. default S007 baseline
+
+**Stage 2:** Top candidates evaluated on development seeds:
+101, 202, 303, 404, 606
+
+**Results:**
+
+Default S007:
+- Mean score: 1040.4675
+- Median score: 1034.1968
+- Min score: 732.2653
+- Mean survival: 1012.44 s
+
+energy_045:
+- Mean score: 909.4650
+- Median score: 834.1604
+- Min score: 619.7021
+- Mean survival: 876.96 s
+
+combo_aggressive:
+- Mean score: 843.4741
+- Median score: 774.9364
+- Min score: 474.8477
+- Mean survival: 812.66 s
+
+**Interpretation:** The initial 3-seed search overfit the small tuning subset. On the broader development set, the original S007 parameters clearly outperform the tuned candidates.
+
+**Decision:** KEEP S007 DEFAULT PARAMETERS. Retain S015 as a tuning harness, but reject the tested parameter modifications.
+
+---
+
+## EXP-S015B — Stuck-recovery parameter search
+
+**Challenge:** Survival Simulator
+
+**Hypothesis:** S007's large gain from stuck-aware navigation suggests its stuck-detection and escape parameters may have additional tuning headroom.
+
+**Parameters tested:**
+- stuck detection steps
+- escape duration
+- minimum progress threshold
+
+**Validation:** 5-seed development screen using parallel workers.
+
+**Ranking:**
+1. baseline — mean 1013.16, median 1034.20, min 732.27
+2. escape_25 — mean 905.20
+3. escape_8 — mean 858.14
+4. progress_1 — mean 838.72
+5. stuck_16 — mean 809.26
+6. stuck_8 — mean 760.24
+7. progress_3 — mean 759.88
+8. stuck_20 — mean 742.81
+
+**Interpretation:** None of the tested stuck-recovery modifications improved upon S007's existing parameters. The hand-selected defaults remain substantially stronger across the development set.
+
+**Decision:** KEEP S007 DEFAULTS. Stop Survival optimization unless later validation or submission testing reveals a specific issue.
+---

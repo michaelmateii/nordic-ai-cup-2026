@@ -38,7 +38,9 @@ MANIPULATE_ENERGY_RATIO = float(
     os.getenv("SURV_MANIPULATE_ENERGY_RATIO", "0.55")
 )
 
-MIN_PROGRESS = 2.0
+MIN_PROGRESS = float(
+    os.getenv("SURV_MIN_PROGRESS", "2.0")
+)
 
 
 def clamp(value, minimum, maximum):

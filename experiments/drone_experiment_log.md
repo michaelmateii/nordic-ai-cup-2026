@@ -640,3 +640,47 @@ Direct warmed inference is ~18 ms on M1, substantially lower than the post-train
 **Decision:** KEEP
 
 Retain task-specific YOLO as the leading localization baseline. Test spatial tiling before additional training.
+
+---
+
+---
+
+# EXP-D009 — Tiled inference for tiny-object localization
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+EXP-D008 misses are concentrated among tiny target classes. Running the same task-specific detector on overlapping image tiles should increase effective target scale and improve localization recall without retraining.
+
+**Change:**  
+Evaluate EXP-D007 `best.pt` at `conf=0.01` with:
+- full 960x540 frame
+- 2x2 tiles with 20% overlap
+- 3x2 tiles with 20% overlap
+
+Every tile is independently resized by YOLO to `imgsz=960`, and detections are mapped back into Level 0 frame coordinates.
+
+**Validation:**  
+Primary: temporal holdout frames 22–24.  
+Secondary: all 25 Helsinki frames.
+
+Metrics:
+- IoU@0.30 proposal recall
+- IoU@0.50 proposal recall
+- per-original-class recall
+- proposals/frame
+- total tiled inference latency
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+**Results:**  
+TBD
+
+**Interpretation:**  
+TBD
+
+**Decision:**  
+TBD

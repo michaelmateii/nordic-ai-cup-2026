@@ -1905,3 +1905,166 @@ Next priority:
 
 Use the retained sequential L1 imagery itself to discover persistent or repeated compact objects without relying on the Helsinki-trained detector.
 TBD
+
+---
+
+# EXP-D024 — Validation-domain temporal median object discovery
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+Repeated validation L1 views at the same camera center might permit a temporal median background model. Compact deviations from that median could provide object candidates without relying on the Helsinki-trained detector.
+
+## Data
+
+Validation acquisition sequence:
+
+`3224a582bfbf4273a028497662b7aa7c`
+
+Exact view used:
+
+- Resolution level: L1
+- Camera center: (1920, 1080)
+- Matching frames: 41
+- Frame-index span: 26–248
+
+Frame indices:
+
+26, 29, 31, 42, 46, 50, 54, 55, 62, 63, 67, 71, 78, 81, 82, 90, 97, 98, 105, 107, 113, 137, 141, 147, 149, 156, 160, 176, 192, 193, 197, 201, 205, 220, 224, 225, 229, 232, 240, 244, 248
+
+## Change
+
+Constructed a grayscale temporal median from all 41 exact-center L1 views.
+
+For every frame:
+
+- absolute difference from median background
+- thresholding
+- morphological opening
+- dilation
+- connected-component candidate extraction
+- area filtering
+
+Thresholds tested:
+
+- 20
+- 30
+- 40
+
+## Results
+
+Threshold 20:
+
+- mean candidates/frame: **142.5**
+- median: **124**
+- maximum: **319**
+
+Threshold 30:
+
+- mean candidates/frame: **281.7**
+- median: **288**
+- maximum: **478**
+
+Threshold 40:
+
+- mean candidates/frame: **396.7**
+- median: **406**
+- maximum: **609**
+
+Visual inspection shows residuals overwhelmingly following:
+
+- vegetation
+- tree boundaries
+- roads
+- buildings
+- roofs
+- construction areas
+- terrain texture
+- urban edges
+
+Increasing the threshold fragments the residual mask into more disconnected components, causing candidate counts to increase rather than producing a cleaner target set.
+
+## Interpretation
+
+The underlying assumption was invalid.
+
+A fixed camera center is defined relative to each source frame, not to a fixed geographic/world coordinate.
+
+As the drone progresses through the sequence, L1 (1920,1080) observes different terrain. The 41 selected frames therefore cannot be combined directly into a stationary temporal background model.
+
+The temporal median represents a mixture of unrelated geographic content, so subtraction highlights general scene differences rather than challenge objects.
+
+This method does not provide usable object proposals.
+
+## Decision
+
+**DISCARD**
+
+Do not continue tuning residual thresholds or morphology for an unregistered long-range temporal median.
+
+A future temporal method would require reliable pairwise image registration between nearby overlapping observations first.
+
+---
+
+# EXP-D025 — Direct labeled-template matching on validation L1
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+If validation reused the same or nearly identical rendered target assets as Helsinki, direct multi-scale normalized template matching might locate targets without learning a detector.
+
+## Data
+
+- Helsinki labeled source-frame crops
+- one median-sized template per class
+- source-to-L1 nominal scale: 0.5x
+- validation sequence: `3224a582bfbf4273a028497662b7aa7c`
+- L1 frames scanned: 194
+- relative template scales: 0.75, 0.90, 1.00, 1.10, 1.25
+
+## Results
+
+| Class | Best NCC | Top-3 mean |
+|---|---:|---:|
+| condor | 0.6711 | 0.6694 |
+| hangar | 0.6944 | 0.6924 |
+| helicopter | 0.4284 | 0.4279 |
+| jammer | 0.8170 | 0.7976 |
+| jet_plane | 0.7674 | 0.7575 |
+| large_launcher | 0.4883 | 0.4793 |
+| large_tower | 0.4957 | 0.4928 |
+| medium_launcher | 0.5611 | 0.5469 |
+| medium_plane | 0.6156 | 0.6131 |
+| mine_roller | 0.6539 | 0.6536 |
+| small_launcher | 0.7768 | 0.7718 |
+| small_plane | 0.6977 | 0.6968 |
+| small_tower | 0.6708 | 0.6694 |
+| spacecraft | 0.5253 | 0.5217 |
+| ta-ta | 0.8231 | 0.8208 |
+| tank | 0.7965 | 0.7954 |
+
+## Interpretation
+
+Raw normalized cross-correlation does not provide reliable class-specific localization in the validation domain.
+
+The visually strongest matches are predominantly background features rather than recognizable target instances.
+
+The apparently high scores for several small classes are especially unreliable because very small templates are searched over a very large number of positions and frames, creating strong chance correlations.
+
+Large-object classes provide a clearer negative control: helicopter, large launcher, large tower and spacecraft have weak scores and incorrect visual matches.
+
+There is therefore no evidence that validation objects can be robustly localized by direct pixel-template reuse from Helsinki.
+
+## Decision
+
+**DISCARD as primary localization method.**
+
+Do not spend time tuning NCC thresholds or adding many more raw templates.
+
+Template similarity may remain useful only as a weak secondary feature after a better candidate generator exists.

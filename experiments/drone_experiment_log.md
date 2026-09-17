@@ -1060,3 +1060,48 @@ However, runtime remains too close to the 333 ms frame interval, and the 455 ms 
 The unexpectedly high MobileNet MPS latency suggests device-launch/synchronization overhead rather than model complexity may dominate. Before changing architecture, benchmark MobileNet on CPU versus MPS and at smaller input resolutions.
 
 **Decision:** KEEP score pipeline / OPTIMIZE runtime.
+
+---
+
+# EXP-D015 — MobileNet runtime device/resolution sweep
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+MobileNetV3's unexpectedly high MPS latency is dominated by accelerator dispatch overhead. CPU inference and/or reduced crop resolution may preserve AP while substantially reducing runtime.
+
+**Change:**  
+Use the exact fixed EXP-D014 YOLO proposals and compare the same MobileNet checkpoint at:
+
+- MPS 224x224
+- MPS 160x160
+- MPS 128x128
+- CPU 224x224
+- CPU 160x160
+- CPU 128x128
+
+YOLO proposals are generated once and held constant so only classifier behavior changes.
+
+**Validation:**  
+Frames 22–24.
+
+Metrics:
+- macro mAP@0.50
+- classifier median/max latency
+- estimated detector + classifier median latency
+
+**Hardware:**  
+MacBook Air M1
+
+**Results:**  
+TBD
+
+**Interpretation:**  
+TBD
+
+**Decision:**  
+TBD
+
+

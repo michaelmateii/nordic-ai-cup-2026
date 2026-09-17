@@ -1017,3 +1017,1168 @@ Pause further evidence-refinement work and establish the first full YES/NO class
 
 ---
 
+## EXP-M012 — Zero-Shot NLI Classification
+
+### Hypothesis
+
+A lightweight NLI model applied to semantically retrieved transcript segments may distinguish positive clinical claims from hard negatives and off-topic questions without task-specific training.
+
+### Configuration
+
+Coarse retrieval:
+
+* lexical segment retrieval, top 8
+* `cross-encoder/ms-marco-MiniLM-L6-v2` reranking
+* top 5 semantic segments passed to NLI
+
+NLI model:
+
+`cross-encoder/nli-deberta-v3-small`
+
+Input formulation:
+
+* premise: retrieved transcript segment
+* hypothesis: raw yes/no question
+
+Decision rule:
+
+Predict YES only if entailment is the highest-probability NLI class for the segment with maximum entailment.
+
+### Initial invalid run
+
+The first evaluation incorrectly converted string answers with:
+
+`bool(row["answer"])`
+
+Because non-empty strings such as `"no"` evaluate to `True`, all 390 gold labels were incorrectly treated as positive.
+
+This run was invalid and was not used for model conclusions.
+
+The evaluation harness was corrected to explicitly parse yes/no strings and now asserts that exactly 195 gold-positive labels are present.
+
+### Corrected results
+
+Overall accuracy:
+
+0.6359
+
+Question-type accuracy:
+
+* positive: 0.2974 (58/195)
+* hard_negative: 0.9648 (137/142)
+* off_topic: 1.0000 (53/53)
+
+Prediction distribution:
+
+* predicted YES: 0.1615
+* gold YES: 0.5000
+
+Confusion matrix:
+
+Rows = gold [NO, YES]
+Columns = predicted [NO, YES]
+
+`[[190, 5], [137, 58]]`
+
+Latency:
+
+* 390-question total: 14.72 s
+* mean/question: 0.0377 s
+* estimated/10-question request: 0.3773 s
+
+### Interpretation
+
+The zero-shot NLI system is strongly conservative.
+
+Negative discrimination is excellent:
+
+* 190/195 negatives correct
+* 96.48% hard-negative accuracy
+* 100% off-topic accuracy
+
+However, positive recall is only 29.74%.
+
+The current requirement that entailment be the argmax NLI class is therefore probably too strict.
+
+The very low runtime leaves ample room for threshold calibration or improved hypothesis formulation.
+
+### Decision
+
+KEEP as the first classification baseline.
+
+Next experiment: conversation-disjoint calibration of continuous NLI scores before changing the model or hypothesis representation.
+
+---
+
+## EXP-M013 — Conversation-Level NLI Threshold Calibration
+
+### Hypothesis
+
+The poor positive recall in EXP-M012 may primarily be caused by an overly strict NLI decision rule rather than absence of useful entailment signal.
+
+Thresholds must be calibrated conversation-disjoint to avoid question-level leakage between questions from the same consultation.
+
+### Method
+
+Used the cached continuous NLI outputs from EXP-M012.
+
+Five-fold `GroupKFold` validation grouped by `transcript_id`.
+
+For each held-out fold:
+
+* choose the threshold using only the other conversations
+* apply that threshold to the held-out conversations
+* aggregate out-of-fold predictions across all 390 questions
+
+Tested score formulations:
+
+* maximum entailment
+* entailment minus contradiction
+* entailment minus maximum other class
+* entailment / (entailment + contradiction)
+
+### Results
+
+#### Maximum entailment
+
+* OOF accuracy: 0.7692
+* predicted YES rate: 0.5872
+* mean threshold: 0.0026
+* positive accuracy: 0.8564
+* hard_negative accuracy: 0.6338
+* off_topic accuracy: 0.8113
+* confusion matrix: `[[133, 62], [28, 167]]`
+
+Fold thresholds:
+
+* 0.0021
+* 0.0021
+* 0.0028
+* 0.0029
+* 0.0033
+
+#### Entailment minus contradiction
+
+* OOF accuracy: 0.7179
+* positive accuracy: 0.4974
+* hard_negative accuracy: 0.9155
+* off_topic accuracy: 1.0000
+
+#### Entailment minus maximum other class
+
+* OOF accuracy: 0.7282
+* positive accuracy: 0.7179
+* hard_negative accuracy: 0.7324
+* off_topic accuracy: 0.7547
+
+#### Entailment ratio
+
+* OOF accuracy: 0.7333
+* positive accuracy: 0.6615
+* hard_negative accuracy: 0.7394
+* off_topic accuracy: 0.9811
+
+### Interpretation
+
+The NLI model contains substantial useful signal that was hidden by EXP-M012's strict argmax-entailment rule.
+
+Maximum entailment is currently the strongest classification feature.
+
+However, recovering positive recall introduces many false positives:
+
+* 167 / 195 positives recovered
+* 62 / 195 negatives incorrectly predicted YES
+
+Hard-negative discrimination is therefore now the dominant classification weakness.
+
+The very low optimum entailment threshold also suggests raw interrogative questions are poorly calibrated as NLI hypotheses.
+
+### Decision
+
+KEEP.
+
+Current classification reference:
+
+`max_entailment` with conversation-disjoint threshold calibration.
+
+Next step: inspect question grammatical forms and convert yes/no questions into declarative hypotheses before rerunning NLI.
+
+---
+
+## EXP-M014 — Declarative-Hypothesis NLI
+
+### Hypothesis
+
+Raw yes/no questions are poorly formed NLI hypotheses. Converting common auxiliary-question structures into declarative clinical claims may improve entailment/contradiction discrimination, particularly for hard negatives.
+
+### Change made
+
+Questions were deterministically converted into declarative hypotheses while preserving their auxiliaries where possible.
+
+Examples of intended transformations:
+
+* `Did the patient report nausea?`
+  → `The patient did report nausea.`
+
+* `Does the patient take aspirin?`
+  → `The patient does take aspirin.`
+
+* `Was the patient prescribed amoxicillin?`
+  → `The patient was prescribed amoxicillin.`
+
+NLI model and retrieval pipeline remained otherwise unchanged.
+
+### Raw uncalibrated results
+
+Overall accuracy:
+
+0.7538
+
+Question-type accuracy:
+
+* positive: 0.5436 (106/195)
+* hard_negative: 0.9577 (136/142)
+* off_topic: 0.9811 (52/53)
+
+Prediction distribution:
+
+* predicted YES: 0.2897
+* gold YES: 0.5000
+
+Confusion matrix:
+
+`[[188, 7], [89, 106]]`
+
+Latency:
+
+* 390 questions: 14.49 s
+* mean/question: 0.0372 s
+* estimated/10-question request: 0.3715 s
+
+### Conversation-disjoint threshold calibration
+
+Five-fold GroupKFold by conversation.
+
+#### Entailment
+
+* OOF accuracy: 0.8256
+* positive: 0.8256
+* hard_negative: 0.7887
+* off_topic: 0.9245
+
+#### Entailment minus contradiction
+
+* OOF accuracy: 0.7795
+* positive: 0.6103
+* hard_negative: 0.9296
+* off_topic: 1.0000
+
+#### Entailment minus maximum other
+
+* OOF accuracy: 0.8077
+* positive: 0.8051
+* hard_negative: 0.8310
+* off_topic: 0.7547
+
+#### Entailment ratio
+
+Best result.
+
+* OOF accuracy: 0.8513
+* predicted YES rate: 0.4641
+* positive: 0.8154
+* hard_negative: 0.8662
+* off_topic: 0.9434
+* confusion matrix: `[[173, 22], [36, 159]]`
+
+Fold thresholds:
+
+* 0.1358
+* 0.1358
+* 0.1311
+* 0.1371
+* 0.1358
+
+Mean threshold:
+
+0.1351
+
+### Interpretation
+
+Declarative hypotheses materially improve NLI classification.
+
+Compared with EXP-M013's strongest OOF result:
+
+* previous accuracy: 0.7692
+* declarative-hypothesis accuracy: 0.8513
+* improvement: +0.0821
+
+The best score formulation also becomes substantially more stable across folds.
+
+Hard-negative accuracy of 86.62% confirms that NLI is learning useful contradiction/value mismatch information rather than merely distinguishing topic relevance.
+
+Remaining errors:
+
+* 36 missed positives
+* 22 false-positive negatives
+
+### Decision
+
+KEEP.
+
+Current primary classification baseline:
+
+Declarative hypotheses + `entailment_ratio` + conversation-disjoint calibration.
+
+Reference operating threshold:
+
+approximately 0.135.
+
+---
+
+## EXP-M015 — First Composite Development Score
+
+### Goal
+
+Combine the strongest current conversation-disjoint classifier with the strongest current deployable evidence method to estimate an end-to-end development score using the official competition formula.
+
+### Components
+
+Classification:
+
+EXP-M014
+
+* declarative NLI hypotheses
+* `entailment_ratio`
+* five-fold conversation-disjoint calibration
+
+Evidence:
+
+EXP-M010
+
+* lexical top-8 segment retrieval
+* MS MARCO cross-encoder segment reranking
+* whole ASR segment returned as evidence
+
+### Results
+
+* Accuracy: 0.8513
+* Mean scored tIoU: 0.3719
+* Composite score: 0.5636
+
+Gold-positive questions predicted YES:
+
+159 / 195
+
+Among gold-positive questions for which evidence was actually returned:
+
+* mean tIoU: 0.4561
+
+### Interpretation
+
+Classification is substantially stronger than localization.
+
+There are two major sources of evidence-score loss:
+
+1. 36 / 195 gold-positive questions are predicted NO, which forces their tIoU contribution to zero.
+2. Whole ASR segments remain too coarse even when the correct evidence neighborhood is found.
+
+The current score should be treated as a development reference rather than a hidden-validation estimate because model and architecture choices have already been informed by the training set.
+
+### Decision
+
+KEEP as the current end-to-end development baseline.
+
+Next step: structured error analysis of the 58 conversation-disjoint classification mistakes before introducing additional rules or models.
+
+---
+
+## EXP-M016 — M014 Classification Error Analysis
+
+### Scope
+
+Analyzed all conversation-disjoint classification errors from EXP-M014 using the best `entailment_ratio` predictions.
+
+### Results
+
+Total errors:
+
+58 / 390
+
+Breakdown:
+
+* false negatives: 36
+* false positives: 22
+
+By question type:
+
+* positive false negatives: 36
+* hard_negative false positives: 19
+* off_topic false positives: 3
+
+Surface features among the 58 errors:
+
+* explicit number in question: 3
+* explicit unit in question: 1
+* explicit negation term in question: 9
+
+### Important observations
+
+Explicit dose/number/unit mismatches are not the dominant error source.
+
+One off-topic false positive had approximately:
+
+* entailment: 0.0006
+* contradiction: 0.0040
+* neutral: 0.9979
+
+Despite overwhelmingly neutral evidence, an entailment-to-contradiction ratio can become misleading when both entailment and contradiction probabilities are extremely small.
+
+The declarative converter also produces malformed hypotheses for some passive constructions. Example:
+
+`Were abnormal sounds heard over the lungs?`
+
+was transformed approximately into:
+
+`Abnormal were sounds heard over the lungs.`
+
+### Interpretation
+
+The next highest-value change is not a medication/dose rules engine.
+
+Two higher-priority issues are:
+
+1. decision calibration should reject low-absolute-entailment cases even when the entailment/contradiction ratio is high;
+2. passive-question declarative conversion needs improvement.
+
+### Decision
+
+Use a conversation-disjoint two-threshold calibration experiment before changing the underlying NLI model.
+
+---
+
+## EXP-M017 — Entailment-Ratio + Absolute-Entailment Gate
+
+### Hypothesis
+
+Some false positives from EXP-M014 occur when both entailment and contradiction probabilities are extremely small, allowing their ratio to look deceptively positive despite an overwhelmingly neutral NLI output.
+
+Adding a minimum absolute entailment threshold may reject those cases.
+
+### Method
+
+Five-fold conversation-disjoint calibration.
+
+A question is predicted YES only if both:
+
+* entailment ratio >= calibrated ratio threshold
+* maximum entailment >= calibrated absolute entailment threshold
+
+Both thresholds are selected using only the training conversations for each fold.
+
+### Results
+
+OOF accuracy:
+
+0.8410
+
+Prediction distribution:
+
+* predicted YES rate: 0.5051
+
+Confusion matrix:
+
+`[[163, 32], [30, 165]]`
+
+Question-type accuracy:
+
+* positive: 0.8462 (165/195)
+* hard_negative: 0.8310 (118/142)
+* off_topic: 0.8491 (45/53)
+
+Mean calibrated thresholds:
+
+* entailment ratio: 0.046765
+* absolute entailment: 0.001228
+
+### Comparison
+
+EXP-M014 ratio-only OOF accuracy:
+
+0.8513
+
+EXP-M017 two-stage OOF accuracy:
+
+0.8410
+
+### Interpretation
+
+Adding an absolute entailment floor does not improve generalization.
+
+Although positive recall increases slightly, both hard-negative and off-topic accuracy fall enough to reduce overall performance.
+
+The fold-specific ratio thresholds also vary considerably, suggesting that this two-dimensional rule is less stable on the small 39-conversation dataset.
+
+A deeper issue remains: EXP-M014 forms the entailment ratio from maximum entailment and maximum contradiction values that may originate from different retrieved transcript segments.
+
+### Decision
+
+DISCARD.
+
+Retain EXP-M014 as the classification reference.
+
+Next experiment: compute NLI evidence/support scores coherently per retrieved segment before aggregating across segments.
+
+---
+
+## EXP-M018 — Coherent Segmentwise NLI Aggregation
+
+### Hypothesis
+
+Previous NLI aggregation combined maximum entailment and maximum contradiction values that could originate from different retrieved transcript segments.
+
+Computing support scores coherently within each individual segment may improve classification.
+
+### Configuration
+
+For each of the top five retrieved transcript segments, compute:
+
+* entailment probability
+* contradiction probability
+* neutral probability
+
+Then derive segment-specific scores.
+
+Tested:
+
+* `max_segment_ratio`
+* `max_segment_entailment`
+* `max_segment_margin`
+* `max_segment_vs_other`
+
+All thresholds were calibrated with five-fold conversation-disjoint GroupKFold validation.
+
+### Raw segment-ratio result
+
+Using a fixed `max_segment_ratio >= 0.5` rule:
+
+* accuracy: 0.8590
+* positive: 0.8974
+* hard_negative: 0.7746
+* off_topic: 0.9434
+
+### Conversation-disjoint calibration
+
+#### max_segment_ratio
+
+* OOF accuracy: 0.8615
+* positive: 0.8923
+* hard_negative: 0.7817
+* off_topic: 0.9623
+* predicted YES rate: 0.5308
+
+#### max_segment_entailment
+
+* OOF accuracy: 0.8256
+* positive: 0.8256
+* hard_negative: 0.7887
+* off_topic: 0.9245
+
+#### max_segment_margin
+
+BEST RESULT.
+
+Score definition:
+
+`entailment - contradiction`
+
+computed within the same retrieved transcript segment.
+
+Results:
+
+* OOF accuracy: 0.8821
+* predicted YES rate: 0.4897
+* positive: 0.8718 (170/195)
+* hard_negative: 0.8662 (123/142)
+* off_topic: 0.9623 (51/53)
+* confusion matrix: `[[174, 21], [25, 170]]`
+
+Fold thresholds:
+
+* 0.000585
+* 0.000585
+* 0.000585
+* 0.000441
+* 0.000585
+
+Mean threshold:
+
+0.000556
+
+#### max_segment_vs_other
+
+* OOF accuracy: 0.7744
+* positive: 0.6000
+* hard_negative: 0.9437
+* off_topic: 0.9623
+
+### Comparison with previous best
+
+EXP-M014:
+
+* OOF accuracy: 0.8513
+
+EXP-M018:
+
+* OOF accuracy: 0.8821
+
+Improvement:
+
++0.0308 absolute accuracy
+
+### Interpretation
+
+Coherent per-segment NLI aggregation materially improves classification.
+
+The best feature is the maximum segment-level entailment-minus-contradiction margin.
+
+This improves positive recall while preserving strong hard-negative and off-topic discrimination.
+
+The result also confirms that independently aggregating entailment and contradiction across unrelated transcript segments was suboptimal.
+
+### Decision
+
+KEEP.
+
+Current primary classification method:
+
+`max_segment_margin`
+
+with conversation-disjoint calibrated threshold approximately:
+
+`0.00056`
+
+---
+
+## EXP-M019 — M018 Composite Development Score
+
+### Goal
+
+Measure the end-to-end development effect of replacing EXP-M014 classification with the stronger coherent segmentwise NLI classifier from EXP-M018 while keeping the evidence-localization method fixed.
+
+### Components
+
+Classification:
+
+* EXP-M018
+* `max_segment_margin`
+* five-fold conversation-disjoint calibration
+
+Evidence:
+
+* EXP-M010
+* cross-encoder segment retrieval
+* whole ASR segment returned as evidence
+
+### Results
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.3816
+* Composite score: 0.5818
+
+Gold-positive questions predicted YES:
+
+170 / 195
+
+Among returned gold-positive spans:
+
+* mean tIoU: 0.4378
+
+### Comparison
+
+EXP-M015:
+
+* Accuracy: 0.8513
+* Mean scored tIoU: 0.3719
+* Composite score: 0.5636
+
+EXP-M019:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.3816
+* Composite score: 0.5818
+
+Composite improvement:
+
++0.0182
+
+### Interpretation
+
+The stronger classifier improves both accuracy and overall scored tIoU by recovering additional gold-positive questions.
+
+However, localization remains the dominant bottleneck.
+
+Classification is now 88.21% accurate, while evidence spans returned for correctly detected positives average only 0.4378 tIoU despite an ASR word-boundary oracle ceiling of 0.9294.
+
+### Decision
+
+KEEP as the current end-to-end development reference.
+
+Shift primary optimization effort to evidence-span localization.
+
+---
+
+## EXP-M020 — Extractive-QA Evidence Anchor
+
+### Hypothesis
+
+A lightweight SQuAD-style extractive QA model may identify a tight answer phrase inside the top semantic evidence neighborhoods, which can then be mapped back to faster-whisper word timestamps.
+
+### Model
+
+`deepset/minilm-uncased-squad2`
+
+### Results
+
+Mean tIoU by answer-span padding:
+
+* ±0 words: 0.2021
+* ±1 word: 0.1951
+* ±2 words: 0.2094
+* ±4 words: 0.2134
+* ±6 words: 0.2007
+
+Best configuration:
+
+±4 words
+
+* mean tIoU: 0.2134
+* median tIoU: 0.1391
+* any overlap: 0.5487
+* tIoU >= 0.50: 0.1487
+
+Latency:
+
+* ~0.094 s/question
+* ~0.944 s/10 questions
+
+### Comparison
+
+M010 whole semantic segment:
+
+0.4347 mean tIoU
+
+M020 best extractive QA:
+
+0.2134 mean tIoU
+
+### Interpretation
+
+SQuAD-style extractive QA is poorly matched to the evidence-localization objective.
+
+The model tends to extract a short answer entity or phrase, while the annotation represents the fuller supporting clinical statement.
+
+Padding the answer does not recover enough of the gold interval.
+
+### Decision
+
+DISCARD.
+
+---
+
+## EXP-M021 — NLI-Margin Segment Evidence
+
+### Hypothesis
+
+The transcript segment producing the strongest segmentwise NLI entailment-minus-contradiction margin may also be a better evidence span than the generic MS MARCO passage-ranking winner.
+
+### Results
+
+Positive questions:
+
+195
+
+Localization:
+
+* mean tIoU: 0.3965
+* median tIoU: 0.4029
+* any overlap: 0.6564
+* tIoU >= 0.25: 0.5692
+* tIoU >= 0.50: 0.4051
+* tIoU >= 0.75: 0.2462
+
+### Comparison
+
+M010 cross-encoder segment:
+
+0.4347 mean tIoU
+
+M021 NLI-margin segment:
+
+0.3965 mean tIoU
+
+### Interpretation
+
+The segment that best supports YES/NO classification is not necessarily the segment whose boundaries best match the annotated evidence interval.
+
+NLI segment scoring remains valuable for classification but should not replace the M010 passage-ranking evidence selector.
+
+### Decision
+
+DISCARD as evidence-selection method.
+
+KEEP M018 NLI-margin scoring for classification.
+
+KEEP M010 MS MARCO segment retrieval as the evidence baseline.
+
+---
+
+## EXP-M022 — NLI Word-Span Refinement
+
+### Hypothesis
+
+The NLI model that performs strongly for YES/NO classification may rank local word windows better than the MS MARCO passage-ranking model.
+
+### Configuration
+
+* top 8 lexical ASR segments
+* MS MARCO reranking
+* top 3 semantic segment neighborhoods
+* local word windows from 4 to 28 words
+* declarative question-to-claim conversion
+* NLI entailment-minus-contradiction margin used to rank windows
+
+### Results
+
+* mean tIoU: 0.3153
+* median tIoU: 0.2779
+* any overlap: 0.7077
+* tIoU >= 0.25: 0.5641
+* tIoU >= 0.50: 0.2821
+* tIoU >= 0.75: 0.1077
+
+Retrieval recall:
+
+* R@1: 0.7077
+* R@3: 0.7692
+* R@5: 0.7795
+
+Candidate ceiling:
+
+* oracle mean tIoU: 0.8219
+* oracle median tIoU: 0.9059
+
+Latency:
+
+* 75,201 NLI window pairs
+* 188.54 seconds total
+* 0.9669 seconds/question
+* 9.6687 seconds/10-question request
+
+### Comparison
+
+* M010 whole semantic segment: 0.4347
+* M011 MS MARCO word refinement: 0.3612
+* M022 NLI word refinement: 0.3153
+
+### Interpretation
+
+NLI is effective for claim classification but poorly suited to selecting exact evidence boundaries from a large set of overlapping word windows.
+
+Arbitrary fixed-size sliding windows remain a poor representation of the annotated evidence despite their high oracle ceiling.
+
+The computational cost is also unnecessarily high.
+
+### Decision
+
+DISCARD.
+
+Stop pursuing brute-force sliding-word-window reranking.
+
+---
+
+## EXP-M023 — Sentence/Utterance Candidate Ceiling
+
+### Hypothesis
+
+Gold evidence intervals may correspond more closely to complete punctuation-delimited spoken statements than to fixed-size word windows.
+
+### Candidate construction
+
+Candidates were generated from faster-whisper word timestamps using punctuation boundaries.
+
+Tested contiguous groups of:
+
+* 1 sentence
+* up to 2 sentences
+* up to 3 sentences
+
+Gold evidence timestamps were used only to calculate the oracle ceiling.
+
+### Results
+
+#### Up to 1 sentence
+
+* mean oracle tIoU: 0.7100
+* median oracle tIoU: 0.8000
+* tIoU >= 0.50: 0.7641
+* tIoU >= 0.75: 0.5436
+* tIoU >= 0.90: 0.3487
+
+#### Up to 2 sentences
+
+* mean oracle tIoU: 0.7854
+* median oracle tIoU: 0.8919
+* tIoU >= 0.50: 0.8513
+* tIoU >= 0.75: 0.6974
+* tIoU >= 0.90: 0.4718
+
+#### Up to 3 sentences
+
+* mean oracle tIoU: 0.7997
+* median oracle tIoU: 0.8974
+* tIoU >= 0.50: 0.8718
+* tIoU >= 0.75: 0.7179
+* tIoU >= 0.90: 0.4974
+
+### Interpretation
+
+Sentence/utterance candidates capture much more of the annotation geometry than whole ASR segments while avoiding the huge redundant candidate space of sliding word windows.
+
+Three-sentence groups provide only a modest oracle improvement over two-sentence groups, but the combined 1–3 sentence candidate set has a useful ceiling near 0.80 mean tIoU.
+
+### Decision
+
+KEEP candidate representation.
+
+Next experiment: directly rank all 1–3 sentence candidates with the MS MARCO cross-encoder.
+
+---
+
+## EXP-M024 — Sentence-Group Cross-Encoder Retrieval
+
+### Hypothesis
+
+The sentence/utterance candidate representation from EXP-M023 has a high oracle localization ceiling. Ranking all 1–3 sentence groups with the MS MARCO cross-encoder may exploit that improved candidate geometry.
+
+### Results
+
+Top-1 localization:
+
+* mean tIoU: 0.3576
+* median tIoU: 0.3095
+* any overlap: 0.7026
+* tIoU >= 0.25: 0.5949
+* tIoU >= 0.50: 0.2974
+* tIoU >= 0.75: 0.1538
+
+Retrieval recall:
+
+* R@1: 0.7026
+* R@3: 0.7846
+* R@5: 0.8308
+
+Candidate ceiling:
+
+* oracle mean tIoU: 0.7997
+* oracle median tIoU: 0.8974
+
+Latency:
+
+* 30,849 pairs scored
+* total rerank time: 16.21 s
+* mean/question: 0.0831 s
+* estimated/10-question request: 0.8313 s
+
+### Comparison
+
+* M010 segment localization: 0.4347
+* M024 sentence-group localization: 0.3576
+
+### Interpretation
+
+Sentence-group candidates remain promising, but generic passage relevance does not reliably select the annotation-compatible boundaries.
+
+The large gap between actual and oracle tIoU indicates a ranking problem rather than a candidate-generation problem.
+
+### Decision
+
+DISCARD MS MARCO as the final sentence-group ranker.
+
+KEEP the 1–3 sentence candidate representation.
+
+Next experiment: supervised conversation-disjoint ranking of sentence candidates using only inference-available features.
+
+---
+
+## EXP-M025 — Supervised Sentence Span Ranker
+
+### Hypothesis
+
+The high oracle quality of 1–3 sentence evidence candidates may be exploitable with a lightweight supervised ranker trained on inference-available features rather than another generic zero-shot reranker.
+
+### Method
+
+Candidates:
+
+* contiguous 1–3 sentence groups derived from faster-whisper punctuation boundaries
+
+Features available at inference time:
+
+* sentence count
+* word count
+* candidate duration
+* lexical TF-IDF similarity
+* MS MARCO semantic relevance
+* temporal IoU with M010 coarse anchor
+* distance from M010 anchor midpoint
+* start-distance from anchor
+* end-distance from anchor
+* whether candidate contains anchor midpoint
+
+Training target:
+
+* temporal IoU against annotated gold evidence
+
+Model:
+
+`HistGradientBoostingRegressor`
+
+Validation:
+
+* 5-fold GroupKFold
+* grouped by `transcript_id`
+* no conversation appears in both training and held-out ranking evaluation
+
+### Results
+
+Questions:
+
+195 positive questions
+
+OOF localization:
+
+* mean tIoU: 0.4771
+* median tIoU: 0.4766
+* any overlap: 0.7231
+* tIoU >= 0.25: 0.6872
+* tIoU >= 0.50: 0.4769
+* tIoU >= 0.75: 0.3333
+
+Candidate ceiling:
+
+* oracle mean tIoU: 0.7997
+* oracle median tIoU: 0.8974
+
+Experiment wall time:
+
+25.26 seconds
+
+### Comparison
+
+* M010 zero-shot segment: 0.4347
+* M024 zero-shot sentence groups: 0.3576
+* M025 supervised sentence groups: 0.4771
+
+Improvement over previous best localization:
+
++0.0424 mean tIoU
+
+### Interpretation
+
+Task-specific supervision materially improves evidence ranking.
+
+The result validates both:
+
+1. sentence/utterance candidate geometry;
+2. conversation-disjoint supervised ranking.
+
+There remains a large ranking gap between the 0.4771 achieved tIoU and 0.7997 sentence-candidate oracle, indicating further feature and ranking improvements may be valuable.
+
+Because model selection has already been influenced by the supplied training set, this OOF result should be treated as a development estimate rather than an unbiased hidden-validation prediction.
+
+### Decision
+
+KEEP.
+
+Current primary evidence-localization method:
+
+supervised 1–3 sentence candidate ranker.
+
+Next step: combine M025 evidence with M018 classification and recompute the development composite score.
+
+---
+
+## EXP-M026 — M025 Composite Development Score
+
+### Goal
+
+Measure the combined development score of the strongest current classifier and strongest conversation-disjoint evidence-localization method.
+
+### Components
+
+Classification:
+
+EXP-M018
+
+* declarative NLI hypotheses
+* coherent segmentwise NLI
+* `max_segment_margin = entailment - contradiction`
+* conversation-disjoint calibrated operating threshold
+
+Evidence localization:
+
+EXP-M025
+
+* 1–3 sentence evidence candidates
+* supervised HistGradientBoosting ranker
+* conversation-disjoint GroupKFold evaluation
+* inference-available features only
+
+### Results
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4183
+* Composite score: 0.6038
+
+Gold-positive questions predicted YES:
+
+170 / 195
+
+Among returned gold-positive evidence spans:
+
+* mean tIoU: 0.4798
+
+### Comparison
+
+EXP-M019:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.3816
+* Composite: 0.5818
+
+EXP-M026:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4183
+* Composite: 0.6038
+
+Improvement:
+
++0.0220 composite score
+
+### Interpretation
+
+The supervised sentence evidence ranker provides a measurable end-to-end gain without changing classification.
+
+Classification and evidence localization have now both been validated conversation-disjoint on the supplied training conversations.
+
+However, repeated architecture decisions have used this same development corpus, so further local optimization risks overfitting model-selection decisions.
+
+### Decision
+
+KEEP.
+
+Current best development pipeline.
+
+Next priority: create a deployable full-data version of the supervised evidence ranker and run the official 19-conversation validation before further local optimization.

@@ -434,3 +434,65 @@ The best configuration requires approximately 261 proposals/frame yet recovers o
 **Decision:** DISCARD
 
 Do not optimize motion-residual proposals further during the current competition phase.
+
+---
+
+---
+
+# EXP-D006 — DINOv2 recognition versus camera zoom
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+The strong DINOv2 recognition result from EXP-D003 depends heavily on object pixel scale. L1/L2 should substantially outperform L0 for small Drone targets.
+
+**Change:**  
+Simulate the effective pixel resolution of camera levels L0, L1 and L2 from the supplied 3840x2160 source frames, then classify padded GT crops using frozen DINOv2-small and leave-one-observation-out prototypes.
+
+**Validation:**  
+259 Helsinki annotations at each effective camera scale.
+
+This measures recognition conditional on correct localization; it does not measure discovery.
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+| Camera level | Accuracy | Median top-1 margin | Median embedding latency |
+|---|---:|---:|---:|
+| L0 | 0.9653 | 0.3461 | 15.0 ms |
+| L1 | 0.9691 | 0.3877 | 15.0 ms |
+| L2 | 0.9730 | 0.3710 | 15.1 ms |
+
+### Notable per-class results
+
+At L0:
+- hangar: 0.667
+- condor: 0.909
+- helicopter: 0.947
+- jet_plane: 0.955
+- large_tower: 0.947
+- small_tower: 0.950
+- spacecraft: 0.957
+- tank: 0.960
+- 8 classes: 1.000
+
+At L1 and L2, overall accuracy remains approximately 97%.
+
+A Transformers channel-dimension warning occurred for one very small L0 crop. This indicates that extremely tiny crops require more careful fixed-shape preprocessing before deployment, so the exact L0 result should not be interpreted as an unbiased production estimate.
+
+**Interpretation:**  
+Given correct localization, frozen DINOv2-small recognition is surprisingly insensitive to camera scale on the supplied identities. Recognition is therefore not currently the dominant challenge.
+
+The much larger unresolved problem is finding target locations. Generic COCO YOLO proposals and motion-compensated residual proposals both failed badly, whereas class recognition on known crops is already strong.
+
+Zoom may still be valuable for localization and confidence, but current evidence does not justify using L2 simply to improve DINO classification.
+
+**Decision:** KEEP
+
+Retain DINOv2-small as the leading class-recognition method. Shift experiment budget toward task-specific localization.
+
+---

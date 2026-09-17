@@ -29,6 +29,13 @@ data/raw/*
 data/interim/*
 data/processed/*
 
+# Challenge runtime outputs
+survival/logs/*
+survival/results/*
+
+!survival/logs/.gitkeep
+!survival/results/.gitkeep
+
 # Keep directory structure
 !data/raw/.gitkeep
 !data/interim/.gitkeep

@@ -68,3 +68,4 @@ medical/artifacts/
 
 # Local CUDA runtime for faster-whisper
 tools/faster-whisper-cuda/
+.venv-drone/

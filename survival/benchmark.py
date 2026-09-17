@@ -165,12 +165,19 @@ def run_simulation(
 
         actions = []
 
+        population_size = len(sim.env.agents)
+
         for agent, agent_state in zip(
             sim.env.agents,
             state["observations"],
         ):
+            # Inject information that is also available to the
+            # real /predict endpoint via len(step.agent_status).
+            policy_state = dict(agent_state)
+            policy_state["_population_size"] = population_size
+
             action = action_decision(
-                agent_state,
+                policy_state,
                 action_rng,
             )
 

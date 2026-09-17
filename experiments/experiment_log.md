@@ -347,3 +347,33 @@
 **Decision:** DISCARD. Do not run full benchmark.
 
 ---
+
+## EXP-S011 — Global-population-aware lineage management
+
+**Challenge:** Survival Simulator
+
+**Hypothesis:** Using the actual number of living agents available at the `/predict` layer can improve reproduction decisions and prevent extinction cascades.
+
+**Change made:**
+- benchmark injects current global population as `_population_size`
+- reproduction thresholds vary for populations of 1, 2, 3–4, and 5+
+- navigation and predator behavior remain based on S007
+
+**Validation:** 5-seed development screen:
+101, 202, 303, 404, 606
+
+**Results:**
+- Mean score: 877.0187
+- Median score: 833.2365
+- Min score: 722.7182
+- Max score: 1121.2835
+- Mean survival: 854.44 s
+- Median survival: 794.40 s
+- Min survival: 689.10 s
+- Max survival: 1098.10 s
+
+**Interpretation:** Broad population-dependent reproduction hurts performance on four of five development seeds. Changing normal reproduction behavior appears more costly than the potential benefit of population awareness.
+
+**Decision:** DISCARD this broad strategy. Retain population context for a narrower emergency-only experiment.
+
+---

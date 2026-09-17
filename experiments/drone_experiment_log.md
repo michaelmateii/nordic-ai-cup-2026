@@ -176,3 +176,80 @@ Prioritize:
 over expensive frame-independent detector tuning.
 
 ---
+
+---
+
+# EXP-D003 — Frozen DINOv2 exemplar recognition screen
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+A strong pretrained visual representation can distinguish the 16 Drone Flyby classes from supplied full-resolution object exemplars without task-specific training. If recognition works when localization is provided, proposal generation + exemplar classification is worth pursuing.
+
+**Change:**  
+Used frozen `facebook/dinov2-small` embeddings on ground-truth object crops padded by 20%. Each observation was classified by cosine similarity to leave-one-observation-out class prototypes.
+
+**Validation:**  
+259 supplied Helsinki GT crops.
+
+This is a representation separability screen, not an unbiased estimate of final evaluation performance, because repeated frames contain the same physical object identity.
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+- Samples: 259
+- Overall classification accuracy: 0.9730
+
+### Per-class accuracy
+
+| Class | Correct | Accuracy |
+|---|---:|---:|
+| condor | 10/11 | 0.909 |
+| hangar | 5/6 | 0.833 |
+| helicopter | 19/19 | 1.000 |
+| jammer | 13/13 | 1.000 |
+| jet_plane | 21/22 | 0.955 |
+| large_launcher | 25/25 | 1.000 |
+| large_tower | 18/19 | 0.947 |
+| medium_launcher | 9/10 | 0.900 |
+| medium_plane | 5/5 | 1.000 |
+| mine_roller | 2/2 | 1.000 |
+| small_launcher | 25/25 | 1.000 |
+| small_plane | 9/9 | 1.000 |
+| small_tower | 20/20 | 1.000 |
+| spacecraft | 22/23 | 0.957 |
+| ta-ta | 25/25 | 1.000 |
+| tank | 24/25 | 0.960 |
+
+### Embedding inference latency
+
+- Mean: 19.9 ms
+- Median: 15.1 ms
+- p95: 23.3 ms
+- Max: 1018.4 ms
+
+The maximum is consistent with one-time model/MPS warm-up; steady-state median and p95 are far lower.
+
+### Similarity confidence
+
+- Median top-1 margin: 0.3710
+- P10 top-1 margin: 0.2361
+
+**Interpretation:**  
+Frozen DINOv2 features separate the supplied Drone classes extremely well when localization is already known. Recognition therefore appears substantially easier than localization/discovery.
+
+The result does not establish cross-scene accuracy because all observations are repeated views of the same 16 physical identities. However, 97.3% leave-one-observation-out accuracy and healthy similarity margins justify using DINOv2 as a low-training class recognizer.
+
+Steady-state embedding latency is low enough to classify several candidate crops per frame, especially if candidates are batched.
+
+The next critical unknown is proposal recall in actual 960x540 camera views.
+
+**Decision:** KEEP
+
+Proceed with pretrained proposal-generation screening, followed by DINO classification and temporal tracking if proposal recall is adequate.
+
+---

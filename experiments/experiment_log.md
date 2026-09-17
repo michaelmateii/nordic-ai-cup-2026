@@ -222,3 +222,37 @@
 **Decision:** KEEP AS CANDIDATE. Do not replace S005 as final policy yet.
 
 ---
+
+## EXP-S007 — Conditional predator manipulation
+
+**Challenge:** Survival Simulator
+
+**Hypothesis:** Predator-facing behavior is useful only under favorable conditions. Immediate threats should trigger direct escape, moderate threats can use the stare/pivot mechanic when energy is healthy, and distant predators should be ignored in favor of food acquisition.
+
+**Change made:**
+- started from S005
+- immediate predator danger (`<= 95`) triggers sprint escape
+- moderate predator distance (`<= 180`) uses predator-facing manipulation only when energy is at least 55% of max
+- distant predators are ignored
+- food seeking and stuck-aware navigation remain the default behavior
+- retained S005 survival-first reproduction
+
+**Validation:** Fixed 10-seed development benchmark:
+101, 202, 303, 404, 505, 606, 707, 808, 909, 1010
+
+**Results:**
+- Mean score: 1018.5050
+- Median score: 1003.6121
+- Min score: 732.2653
+- Max score: 1322.0793
+- Stddev: 165.0793
+- Mean survival: 993.61 s
+- Median survival: 982.45 s
+- Min survival: 706.20 s
+- Max survival: 1272.60 s
+
+**Interpretation:** Conditional predator manipulation substantially outperforms both S005 and S006. It preserves robust food acquisition while capturing some of the predator-facing mechanic's upside.
+
+**Decision:** KEEP. New primary survival controller.
+
+---

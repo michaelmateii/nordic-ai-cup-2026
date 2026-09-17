@@ -1196,3 +1196,77 @@ This preserves most of the scoring performance while remaining below the 333 ms 
 Use `YOLO_CONF=0.010` as the default realtime static pipeline operating point.
 
 Retain `0.005` as an offline/high-recall option and possible occasional discovery mode if temporal scheduling later creates compute headroom.
+
+---
+
+# EXP-D017 — Oracle-assisted tracking upper-bound screen
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+Drone targets persist across consecutive frames with strong predictable motion. Once a target is acquired, simple constant-velocity propagation may recover a substantial fraction of detector misses.
+
+**Change:**  
+Run the matched tiled detector at the realtime operating point (`conf=0.01`) over all 25 Helsinki frames.
+
+For diagnostic purposes only, use GT identity matching to associate successful detections with physical target classes. Propagate acquired boxes forward using constant velocity and combine propagated boxes with fresh detector proposals.
+
+This uses oracle association and is therefore not a deployable tracker; it measures the upper bound/value of temporal persistence.
+
+**Validation:**  
+All 25 Helsinki frames.
+
+Metrics:
+- detector-only proposal recall @ IoU 0.50
+- detector + propagated-track recall @ IoU 0.50
+- absolute recall gain
+- per-class recall gain
+- detector latency
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+- Total GT instances: 259
+- Detector-only hits: 249
+- Detector-only recall @ IoU 0.50: 0.9614
+- Propagated-track hits: 223
+- Combined detector + propagation hits: 250
+- Combined recall @ IoU 0.50: 0.9653
+- Absolute recall gain: +0.0039
+- Median tiled-detector latency: 84.3 ms
+
+### Per-class recall
+
+| Class | Detector | Detector + tracking |
+|---|---:|---:|
+| condor | 1.000 | 1.000 |
+| hangar | 0.500 | 0.667 |
+| helicopter | 1.000 | 1.000 |
+| jammer | 1.000 | 1.000 |
+| jet_plane | 1.000 | 1.000 |
+| large_launcher | 1.000 | 1.000 |
+| large_tower | 1.000 | 1.000 |
+| medium_launcher | 0.900 | 0.900 |
+| medium_plane | 0.200 | 0.200 |
+| mine_roller | 1.000 | 1.000 |
+| small_launcher | 1.000 | 1.000 |
+| small_plane | 1.000 | 1.000 |
+| small_tower | 1.000 | 1.000 |
+| spacecraft | 0.957 | 0.957 |
+| ta-ta | 1.000 | 1.000 |
+| tank | 0.960 | 0.960 |
+
+**Interpretation:**  
+Even with oracle identity association, constant-velocity temporal propagation adds only one additional correctly localized GT instance across the entire Helsinki sequence.
+
+The 96.1% detector-only recall is not a generalization estimate because most frames overlap with detector training. However, the negligible +0.39 percentage-point tracking gain indicates that simple propagation is unlikely to justify substantial engineering effort.
+
+Tracking may still be useful later for identity stabilization or reducing how often classification is required, but it should not currently be treated as a primary score-improvement mechanism.
+
+**Decision:** DISCARD as a score-priority direction.
+
+Do not implement a sophisticated tracker now.

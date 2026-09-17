@@ -256,3 +256,32 @@
 **Decision:** KEEP. New primary survival controller.
 
 ---
+
+## EXP-S008 — Energy-efficient navigation
+
+**Challenge:** Survival Simulator
+
+**Hypothesis:** Reducing unnecessary requested movement, compensating for biome movement penalties, and slowing exploration will reduce energy expenditure and increase survival.
+
+**Change made:**
+- retained S007 predator and lineage logic
+- matched requested movement to fruit distance
+- compensated requested distance for biome movement modifiers
+- reduced exploration movement speed when no food was visible
+- retained full movement in river and higher movement when energy was low
+
+**Validation:** 5-seed development screen:
+101, 202, 303, 404, 606
+
+**Results:**
+- Mean score: 898.1375
+- Median score: 905.8858
+- Min score: 818.1602
+- Max score: 985.8722
+- Mean survival: 880.98 s
+- Median survival: 904.80 s
+
+**Interpretation:** More conservative movement improved seed 404 and raised consistency, but substantially reduced performance on four of five development seeds. Reduced exploration/food acquisition appears to cost more than the saved movement energy.
+
+**Decision:** DISCARD as primary policy. Do not run full 10-seed benchmark. Investigate individual energy-efficiency changes separately.
+---

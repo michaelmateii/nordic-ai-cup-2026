@@ -23,13 +23,16 @@ if str(OFFICIAL) not in sys.path:
     )
 
 
-from dtos import (  # noqa: E402
+from dtos import (
     DroneFlybyPredictRequestDto,
     DroneFlybyPredictResponseDto,
     RequestedViewDto,
 )
 
-from capture import capture_request  # noqa: E402
+from utils import decode_view
+
+from capture import capture_request
+from model_runtime import detect
 
 
 logger = logging.getLogger(__name__)
@@ -39,15 +42,10 @@ FULL_CENTER_X = 1920
 FULL_CENTER_Y = 1080
 
 
-def choose_capture_view(
+def choose_next_view(
     request: DroneFlybyPredictRequestDto,
 ):
-    """
-    Keep/reset camera to complete L0 view.
-
-    This maximizes information retained from the validation sequence.
-    """
-
+    # For D019 keep full L0 coverage.
     if (
         request.view.resolution_level == 0
         and request.view.center_x
@@ -55,7 +53,6 @@ def choose_capture_view(
         and request.view.center_y
         == FULL_CENTER_Y
     ):
-        # Already at the complete view.
         return None
 
     if (
@@ -77,25 +74,37 @@ def predict(
 ) -> DroneFlybyPredictResponseDto:
 
     try:
-        captured_path = (
-            capture_request(
-                request
-            )
-        )
-
-        logger.info(
-            "Captured frame %s index %s -> %s",
-            request.frame,
-            request.frame_index,
-            captured_path,
+        capture_request(
+            request
         )
 
     except Exception:
-        # Capture must never cost us the prediction.
         logger.exception(
-            "Capture failed for frame %s",
+            "Capture failed on frame %s",
             request.frame,
         )
+
+    try:
+        image = decode_view(
+            request.view
+        )
+
+        annotations = detect(
+            image,
+            original_width=
+                request.original_width,
+
+            original_height=
+                request.original_height,
+        )
+
+    except Exception:
+        logger.exception(
+            "Model failed on frame %s",
+            request.frame,
+        )
+
+        annotations = []
 
     return DroneFlybyPredictResponseDto(
         request_id=
@@ -104,10 +113,11 @@ def predict(
         frame=
             request.frame,
 
-        annotations=[],
+        annotations=
+            annotations,
 
         requested_view=
-            choose_capture_view(
+            choose_next_view(
                 request
             ),
     )

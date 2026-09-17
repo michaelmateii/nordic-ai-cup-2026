@@ -1359,3 +1359,160 @@ Holding Level 0 retains the complete source frame on every timestep and is there
 **Decision:** KEEP
 
 Integrate the current realtime CV pipeline while retaining capture.
+
+---
+
+# EXP-D019 — Competition-server integration of realtime static pipeline
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+The EXP-D016 operating point can be deployed through the exact competition DTO/API while retaining capture and remaining below the realtime frame cadence.
+
+**Change:**  
+Integrate:
+- request capture
+- Level 0 full-frame hold
+- matched 2x2 tiled YOLO11n
+- YOLO confidence 0.01
+- NMS
+- MobileNetV3-Small 224x224 recognition
+- frame-global normalized response boxes
+
+Models are loaded once at server startup.
+
+**Validation:**  
+Official Helsinki local evaluator in realtime mode.
+
+Success criteria:
+- non-zero mAP
+- 25 accepted responses
+- 0 invalid responses
+- 0 timeouts
+- 0 skipped frames if possible
+- captured frame_index remains continuous
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+Official realtime Helsinki evaluator:
+
+- Frames in scene: 25
+- Frames sent: 12
+- Frames skipped: 13
+- Responses accepted: 12
+- Timeouts: 0
+- HTTP errors: 0
+- Invalid responses: 0
+
+Round-trip latency:
+- Mean: 515 ms
+- Median: 313 ms
+- Max: 1267 ms
+
+COCO mAP@0.50: 0.449
+
+Notable AP:
+- condor: 0.634
+- jammer: 0.614
+- small_plane: 0.554
+- small_tower: 0.554
+- helicopter: 0.525
+- spacecraft: 0.525
+- jet_plane: 0.505
+- mine_roller: 0.505
+- medium_plane: 0.000
+
+**Interpretation:**  
+The integrated detector/classifier produces meaningful predictions, but realtime latency is unstable enough to skip more than half the sequence.
+
+The local isolated benchmarks underestimated true request-path latency. The extreme 1267 ms spike suggests MPS graph/warmup overhead from changing MobileNet batch shapes is a likely contributor.
+
+The server currently warms MobileNet with only one crop, while real frames contain variable proposal batches.
+
+**Decision:** REVISE
+
+Do not use this configuration for the real validation sequence. Stabilize inference batch shape and lower proposal load first.
+
+---
+
+# EXP-D020 — Fixed-batch realtime runtime stabilization
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+The frame skipping observed in EXP-D019 was caused largely by unstable MPS execution from variable classifier batch shapes and insufficient startup warmup. A fixed MobileNet batch shape plus a slightly higher YOLO threshold should stabilize realtime latency.
+
+**Change:**  
+- YOLO confidence increased from 0.01 to 0.025
+- MobileNet classifier padded to fixed batch size 16
+- YOLO tiles warmed at startup
+- MobileNet fixed batch shape warmed three times before serving requests
+- capture retained
+- camera held at full Level 0
+
+**Validation:**  
+Official Helsinki local evaluator with `--realtime`.
+
+## Results
+
+Attempt statistics:
+
+- Frames in scene: 25
+- Frames sent: 25
+- Frames skipped: 0
+- Frames unanswered: 0
+- Responses accepted: 25
+- Timeouts: 0
+- HTTP errors: 0
+- Invalid responses: 0
+- Camera moves applied: 0
+- Camera moves refused: 0
+
+Round-trip latency:
+
+- Mean: 157 ms
+- Median: 145 ms
+- Max: 414 ms
+
+COCO mAP@0.50: **0.892**
+
+### Per-class AP@0.50
+
+| Class | AP |
+|---|---:|
+| helicopter | 1.000 |
+| jet_plane | 1.000 |
+| large_launcher | 1.000 |
+| large_tower | 1.000 |
+| mine_roller | 1.000 |
+| small_launcher | 1.000 |
+| small_plane | 1.000 |
+| small_tower | 1.000 |
+| ta-ta | 1.000 |
+| condor | 1.000 |
+| jammer | 1.000 |
+| tank | 0.960 |
+| spacecraft | 0.950 |
+| medium_launcher | 0.871 |
+| hangar | 0.281 |
+| medium_plane | 0.208 |
+
+**Interpretation:**  
+Fixed classifier batching and full startup warmup eliminate the severe realtime instability observed in EXP-D019.
+
+Despite one 414 ms outlier, no frames were skipped. Typical request latency is now comfortably below the 333 ms frame interval.
+
+The static pipeline is highly effective on Helsinki, with remaining errors concentrated primarily in `hangar` and `medium_plane`.
+
+Further broad model changes are not justified before observing the real validation distribution.
+
+**Decision:** KEEP
+
+Use this configuration for the first real validation-sequence capture attempt.

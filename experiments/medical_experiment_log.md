@@ -329,3 +329,236 @@ Despite its smaller parameter count and lower memory usage, `openai/whisper-smal
 
 DISCARD as primary runtime candidate.
 
+---
+
+## EXP-M004 — faster-whisper Distil-Large-v3 INT8/FP32
+
+### Hypothesis
+
+CTranslate2/faster-whisper may preserve the transcription quality and word-level timestamp capability of Distil-Whisper large-v3 while substantially reducing inference latency on the GTX 1060.
+
+### Configuration
+
+Backend:
+
+`faster-whisper 1.2.1`
+
+CTranslate2:
+
+`4.8.2`
+
+Model:
+
+`distil-large-v3`
+
+Device:
+
+`cuda`
+
+Compute type:
+
+`int8_float32`
+
+Beam size:
+
+`1`
+
+Other settings:
+
+* word timestamps: enabled
+* language: English
+* VAD: disabled
+* condition_on_previous_text: false
+
+CTranslate2-reported CUDA compute types on GTX 1060:
+
+* int8
+* int8_float32
+* float32
+
+FP16 is not reported as a supported CUDA compute type on this machine.
+
+### Validation
+
+Primary test:
+
+`conversation_sample_20.mp3`
+
+### Initial runtime result
+
+The faster-whisper model downloaded and loaded successfully, but first GPU inference failed with:
+
+`RuntimeError: Library cublas64_12.dll is not found or cannot be loaded`
+
+This confirms that the Python/CTranslate2 installation can detect the CUDA-capable GPU but the required external CUDA 12 cuBLAS runtime DLLs are not currently visible to Windows.
+
+This is an environment/runtime dependency issue, not a model failure.
+
+### Runtime fix
+
+Project-local CUDA 12 cuBLAS and cuDNN 9 runtime DLLs were added to the Medical CMD session PATH.
+
+No system-wide CUDA or cuDNN installation was required, and the working PyTorch CUDA environment was left unchanged.
+
+### Successful CUDA retest
+
+Configuration:
+
+* backend: `faster-whisper 1.2.1`
+* CTranslate2: `4.8.2`
+* model: `distil-large-v3`
+* device: `cuda`
+* compute type: `int8_float32`
+* beam size: `1`
+* word timestamps: enabled
+* language: English
+* VAD: disabled
+* `condition_on_previous_text`: false
+
+Tested on:
+
+`conversation_sample_20.mp3`
+
+Results:
+
+* model load: 4.30 s
+* inference latency: 10.47 s
+* segments: 64
+* timestamped words: 607
+* detected language: English
+* language probability: 1.0000
+* word timestamps: successful
+
+Qualitative transcription preserved the major clinical facts, including:
+
+* Pamol
+* ibumetin / related medication references
+* paracetamol
+* generalized or widespread pain
+* stable pain problem
+* continued need for pain relief
+* no examination performed during the visit
+* no treatment change
+* renewal of both prescriptions
+
+Medication spelling varied between mentions, including forms such as `Ibumetan`, `ibupetin`, `Pamel`, and `Ibumetin`, but the underlying medication concepts were retained.
+
+Unlike the Transformers chunked runs, no obvious duplicated overlap passages were observed.
+
+### Comparison on conversation_sample_20.mp3
+
+* Distil-large-v3 / Transformers / word timestamps: 50.79 s
+* Distil-medium.en / Transformers / segment timestamps: 29.21 s
+* Whisper-small.en / Transformers / word timestamps: 57.86 s
+* Distil-large-v3 / faster-whisper / word timestamps: 10.47 s
+
+The faster-whisper configuration is approximately 4.9x faster than the Transformers Distil-large-v3 run while retaining word-level timestamps.
+
+### Interpretation
+
+This is currently the strongest measured ASR configuration.
+
+It combines:
+
+* sufficiently strong qualitative transcription
+* native word-level timestamps
+* no observed chunk-overlap duplication
+* substantial latency margin under the 60-second request timeout
+
+A 10.47-second ASR time on the longest supplied training conversation leaves roughly 49 seconds for request decoding, evidence retrieval, classification, evidence refinement, response construction, and runtime variation.
+
+The remaining ASR risk is primarily transcription accuracy for medications, numbers, doses, units, and short negations rather than latency.
+
+### Decision
+
+KEEP.
+
+Current primary ASR candidate.
+
+Next experiment: benchmark and cache all 39 supplied conversations using one persistent faster-whisper model instance.
+
+---
+
+## EXP-M005 — Full-Corpus faster-whisper Benchmark
+
+### Hypothesis
+
+The selected faster-whisper configuration should remain comfortably below the 60-second request timeout across the complete supplied training corpus when the model is loaded once and reused between conversations.
+
+### Configuration
+
+Backend:
+
+`faster-whisper 1.2.1`
+
+CTranslate2:
+
+`4.8.2`
+
+Model:
+
+`distil-large-v3`
+
+Device:
+
+`cuda`
+
+Compute type:
+
+`int8_float32`
+
+Beam size:
+
+`1`
+
+Other settings:
+
+* word timestamps enabled
+* language forced to English
+* VAD disabled
+* `condition_on_previous_text=false`
+* one persistent loaded model reused across all conversations
+
+### Validation
+
+Complete supplied training corpus:
+
+* conversations: 39
+* one ASR pass per conversation
+* timestamped transcripts cached locally
+
+### Results
+
+* mean inference latency: 5.53 s
+* median inference latency: 4.98 s
+* worst inference latency: 10.58 s
+* best inference latency: 3.48 s
+* total inference wall time: 215.90 s
+* worst-latency file: `conversation_sample_20.mp3`
+
+### Interpretation
+
+The selected faster-whisper configuration provides a very large latency margin under the 60-second per-request timeout.
+
+Even the slowest supplied conversation requires only 10.58 seconds for ASR, leaving roughly 49 seconds for:
+
+* Base64/audio handling
+* evidence retrieval
+* yes/no classification
+* hard-negative discrimination
+* evidence refinement
+* response validation
+* runtime variance
+
+Further ASR speed optimization currently has substantially lower expected value than improving question answering and evidence localization.
+
+The cached timestamped transcripts now allow downstream retrieval/classification experiments to run without repeatedly paying ASR cost.
+
+### Decision
+
+KEEP.
+
+Freeze `faster-whisper distil-large-v3 / CUDA int8_float32 / beam=1` as the primary ASR baseline until evidence shows that ASR accuracy is limiting downstream score.
+
+Next experiment: evaluate timestamp-aware evidence retrieval against the 195 gold-positive evidence intervals.
+

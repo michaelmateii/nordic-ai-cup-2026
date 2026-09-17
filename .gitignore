@@ -56,3 +56,9 @@ outputs/predictions/*
 .cache/
 wandb/
 runs/
+
+# Medical challenge generated artifacts
+medical/artifacts/
+
+# Local CUDA runtime for faster-whisper
+tools/faster-whisper-cuda/

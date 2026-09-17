@@ -2068,3 +2068,150 @@ There is therefore no evidence that validation objects can be robustly localized
 Do not spend time tuning NCC thresholds or adding many more raw templates.
 
 Template similarity may remain useful only as a weak secondary feature after a better candidate generator exists.
+
+---
+
+# EXP-D026A — Dense DINO validation localization screen
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+EXP-D003 showed that DINOv2 embeddings strongly separate the sixteen classes when localization is already known.
+
+The existing pipeline might therefore fail primarily because of proposal generation rather than because the DINO representation itself is unsuitable.
+
+A dense DINO feature map could potentially localize target-like regions directly without YOLO.
+
+## Change
+
+Built normalized DINOv2-Small class prototypes from all labeled Helsinki crops.
+
+For 16 representative real validation L1 frames:
+
+- resized full 960×540 view to 896×504
+- performed one DINOv2 forward pass
+- retained dense patch-token feature map
+- pooled regions according to expected class-specific L1 dimensions
+- computed cosine similarity to each Helsinki class prototype
+- retained top spatial locations per class
+- visually inspected the best three per class
+
+No YOLO proposals and no model training were used.
+
+## Results
+
+| Class | Best | Top-3 | Top-5 |
+|---|---:|---:|---:|
+| condor | 0.4857 | 0.4853 | 0.4845 |
+| hangar | 0.4099 | 0.4087 | 0.4060 |
+| helicopter | 0.4262 | 0.4252 | 0.3948 |
+| jammer | 0.3515 | 0.3484 | 0.3332 |
+| jet_plane | 0.4907 | 0.4884 | 0.4847 |
+| large_launcher | 0.4625 | 0.4606 | 0.4579 |
+| large_tower | 0.5554 | 0.5477 | 0.5387 |
+| medium_launcher | 0.4459 | 0.4426 | 0.4405 |
+| medium_plane | 0.4245 | 0.4123 | 0.4044 |
+| mine_roller | 0.3790 | 0.3780 | 0.3534 |
+| small_launcher | 0.4191 | 0.4160 | 0.3953 |
+| small_plane | 0.4461 | 0.4368 | 0.4276 |
+| small_tower | 0.4462 | 0.4438 | 0.4424 |
+| spacecraft | 0.3784 | 0.3728 | 0.3666 |
+| ta-ta | 0.3073 | 0.3048 | 0.3022 |
+| tank | 0.3566 | 0.3526 | 0.3504 |
+
+## Visual audit
+
+Top DINO locations are overwhelmingly background:
+
+- grass
+- forest
+- roads
+- roofs
+- generic building structure
+- terrain texture
+
+There is no consistent visual evidence that the top locations correspond to the intended challenge classes.
+
+The similarities are also relatively low and tightly grouped, with little separation between the best and subsequent matches.
+
+## Interpretation
+
+DINOv2 is effective at distinguishing repeated Helsinki target appearances when target localization is already known, but Helsinki class prototypes do not transfer reliably enough to directly localize the same semantic classes in the validation domain.
+
+This confirms that the domain/instance gap is too large for straightforward feature-space transfer.
+
+Together with EXP-D023 and EXP-D025, there is now strong evidence that further automatic Helsinki-to-validation transfer is low value.
+
+## Decision
+
+**DISCARD as primary localization strategy.**
+
+Stop spending competition time on:
+
+- Helsinki-trained proposal models
+- Helsinki raw templates
+- Helsinki DINO prototype localization
+
+Next direction:
+
+**EXP-D027 — manual validation-domain seeds + within-validation propagation.**
+
+Instead of transferring class appearance from Helsinki, manually identify a small number of high-confidence validation targets and use the validation sequence itself for same-instance propagation and pseudo-label generation.
+
+---
+
+# EXP-D027A — Manual real-validation seed annotation
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+A small number of high-confidence real-validation annotations may provide substantially stronger anchors than attempting to transfer object appearance directly from Helsinki.
+
+## Data
+
+Source:
+
+`3224a582bfbf4273a028497662b7aa7c`
+
+A subset of 30 retained L1 validation frames was manually inspected against the sixteen-class Helsinki reference sheet.
+
+Only visually high-confidence targets were annotated.
+
+## Results
+
+- Manual annotations: **23**
+- Frames labeled: **18**
+
+Class distribution:
+
+- helicopter: 2
+- large_launcher: 2
+- large_tower: 6
+- medium_plane: 2
+- mine_roller: 2
+- medium_launcher: 1
+- tank: 8
+
+Seven of sixteen classes received at least one real-domain seed.
+
+Six classes have at least two seeds and can therefore be used for direct propagation validation.
+
+## Interpretation
+
+Manual inspection can identify several target classes reliably in the real validation domain.
+
+These real-domain boxes eliminate the cross-domain appearance problem encountered in EXP-D023–D026A.
+
+The next step is not to train immediately, but to quantitatively test whether a seed from one validation frame can recover the corresponding target in another manually labeled validation frame.
+
+## Decision
+
+**KEEP**
+
+Proceed to EXP-D027B leave-one-seed-out propagation benchmark.

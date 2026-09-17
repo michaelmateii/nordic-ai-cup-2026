@@ -332,3 +332,105 @@ Steady-state inference itself is fast (~19 ms), but useful recall would require 
 Do not spend competition time tuning generic COCO YOLO as the primary proposal mechanism.
 
 ---
+
+# EXP-D005 — Motion-compensated temporal proposals
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+Because Drone Flyby is a sequential 3 FPS scene with strong coherent camera motion, aligning consecutive Level 0 frames and examining residual changes may expose targets that generic COCO objectness misses.
+
+**Change:**  
+Estimate previous→current global image motion with ORB features + RANSAC affine alignment. Warp the previous Level 0 frame into the current frame, compute absolute residual, threshold it, and use connected components as class-agnostic proposals.
+
+**Validation:**  
+Frames 2–25 of Helsinki. Frame 1 is excluded because no previous image exists.
+
+Metrics:
+- proposal recall @ IoU 0.30
+- proposal recall @ IoU 0.50
+- per-class proposal recall
+- proposals/frame
+- processing latency
+- affine RANSAC inlier count
+
+Residual thresholds:
+- 12
+- 20
+- 30
+- 45
+
+**Hardware:**  
+MacBook Air M1 / CPU OpenCV
+
+## Results
+
+### Residual threshold 12
+- Mean proposals/frame: 179.8
+- Median proposals/frame: 179.5
+- Median latency: 62.1 ms
+- p95 latency: 66.0 ms
+- Median affine inliers: 598
+- Minimum affine inliers: 564
+- Proposal recall @ IoU 0.30: 0.0806
+- Proposal recall @ IoU 0.50: 0.0282
+
+### Residual threshold 20 — best recall
+- Mean proposals/frame: 261.4
+- Median proposals/frame: 264.0
+- Median latency: 60.9 ms
+- p95 latency: 65.8 ms
+- Median affine inliers: 598
+- Minimum affine inliers: 564
+- Proposal recall @ IoU 0.30: 0.1694
+- Proposal recall @ IoU 0.50: 0.0847
+
+### Residual threshold 30
+- Mean proposals/frame: 217.8
+- Median proposals/frame: 192.5
+- Median latency: 60.6 ms
+- p95 latency: 66.1 ms
+- Proposal recall @ IoU 0.30: 0.1008
+- Proposal recall @ IoU 0.50: 0.0444
+
+### Residual threshold 45
+- Mean proposals/frame: 83.4
+- Median proposals/frame: 81.5
+- Median latency: 60.5 ms
+- p95 latency: 66.1 ms
+- Proposal recall @ IoU 0.30: 0.0323
+- Proposal recall @ IoU 0.50: 0.0081
+
+### Best per-class recall at threshold 20
+
+| Class | IoU@0.30 | IoU@0.50 |
+|---|---:|---:|
+| condor | 0.200 | 0.000 |
+| hangar | 0.000 | 0.000 |
+| helicopter | 0.222 | 0.111 |
+| jammer | 0.000 | 0.000 |
+| jet_plane | 0.227 | 0.227 |
+| large_launcher | 0.667 | 0.417 |
+| large_tower | 0.053 | 0.000 |
+| medium_launcher | 0.000 | 0.000 |
+| medium_plane | 0.000 | 0.000 |
+| mine_roller | 0.000 | 0.000 |
+| small_launcher | 0.000 | 0.000 |
+| small_plane | 0.000 | 0.000 |
+| small_tower | 0.211 | 0.158 |
+| spacecraft | 0.273 | 0.000 |
+| ta-ta | 0.000 | 0.000 |
+| tank | 0.167 | 0.042 |
+
+**Interpretation:**  
+Global frame registration is reliable, so low proposal recall is not caused by failed alignment. After motion compensation, most Drone targets still do not form clean residual components distinguishable from terrain/rendering changes.
+
+The best configuration requires approximately 261 proposals/frame yet recovers only 16.9% of GT objects at IoU 0.30. Seven classes have zero proposal recall even at the loose IoU threshold.
+
+`large_launcher` is a notable exception with 66.7% recall @0.30, so motion residuals may later be retained as a cheap auxiliary signal for some large targets, but they are not suitable as the primary discovery mechanism.
+
+**Decision:** DISCARD
+
+Do not optimize motion-residual proposals further during the current competition phase.

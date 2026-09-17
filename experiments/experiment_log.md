@@ -412,3 +412,34 @@
 **Decision:** DISCARD. Do not run full benchmark.
 
 ---
+
+## EXP-S014 — Retirement cloning
+
+**Challenge:** Survival Simulator
+
+**Hypothesis:** Old agents suffer severe age-related energy drain, so allowing sufficiently old agents with limited remaining energy to reproduce could convert otherwise-wasted energy into a young successor.
+
+**Change made:**
+- retained all S007 navigation, predator, and normal reproduction behavior
+- additionally forced reproduction when:
+  - age >= 70
+  - energy >= 110
+
+**Validation:** 5-seed development screen:
+101, 202, 303, 404, 606
+
+**Results:**
+- Mean score: 711.7171
+- Median score: 751.1887
+- Min score: 436.8518
+- Max score: 890.7809
+- Mean survival: 679.08 s
+- Median survival: 701.00 s
+- Min survival: 416.50 s
+- Max survival: 851.30 s
+
+**Interpretation:** Forced late-life reproduction causes a major regression. The 100-energy reproduction cost appears more damaging than allowing S007's existing lineage dynamics to handle aging naturally.
+
+**Decision:** DISCARD. Do not run full benchmark.
+
+---

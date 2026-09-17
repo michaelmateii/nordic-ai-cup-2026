@@ -316,3 +316,34 @@
 **Decision:** DISCARD. Keep S007 as primary policy.
 
 ---
+
+## EXP-S010 — Isolation-aware lineage management
+
+**Challenge:** Survival Simulator
+
+**Hypothesis:** Locally sensed agents can serve as a proxy for lineage safety, allowing isolated agents to reproduce earlier while nearby groups reproduce conservatively.
+
+**Change made:**
+- retained S007 navigation and predator behavior
+- counted locally sensed `Agent` observations
+- reproduced earlier when no nearby agent was sensed
+- reproduced more conservatively when nearby agents were sensed
+
+**Validation:** 5-seed development screen:
+101, 202, 303, 404, 606
+
+**Results:**
+- Mean score: 677.0025
+- Median score: 717.5131
+- Min score: 432.8835
+- Max score: 922.7987
+- Mean survival: 645.50 s
+- Median survival: 681.20 s
+- Min survival: 395.20 s
+- Max survival: 902.30 s
+
+**Interpretation:** Local isolation is a poor proxy for global population risk. Agents can be spatially isolated while the overall lineage remains healthy, causing excessive and mistimed reproduction.
+
+**Decision:** DISCARD. Do not run full benchmark.
+
+---

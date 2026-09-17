@@ -1723,3 +1723,78 @@ Objectives:
 3. capture real validation-domain imagery at substantially higher spatial resolution
 4. use retained validation imagery for domain-specific discovery, pseudo-labeling, template/feature matching, and model adaptation
 5. only then run another scoring validation
+
+---
+
+# EXP-D022 — Capture-only Level-1 validation scanner
+
+**Status:** COMPLETE / READY FOR REAL VALIDATION CAPTURE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+The repeatable validation sequence can be used as legal high-resolution domain-data acquisition.
+
+Removing detector/classifier inference should eliminate realtime frame loss, while systematic Level-1 camera movement provides substantially more spatial detail than Level 0.
+
+## Change
+
+Replaced the scoring predictor with a capture-only camera scanner.
+
+Pipeline:
+
+- persist every received image + request metadata
+- return zero annotations
+- request Level 1 views
+- cycle among four Level-1 target regions
+- obey dynamic camera bounds
+- obey maximum center movement
+- reserve a 1 px movement safety margin
+
+No YOLO or MobileNet inference is performed.
+
+## Local realtime validation
+
+Official Helsinki evaluator with `--realtime`:
+
+- Frames in scene: 25
+- Frames sent: 25
+- Frames skipped: 0
+- Frames unanswered: 0
+- Responses accepted: 25
+- Timeouts: 0
+- HTTP errors: 0
+- Invalid responses: 0
+- Camera moves applied: **25**
+- Camera moves refused: **0**
+
+Round-trip latency:
+
+- Mean: **11 ms**
+- Median: **11 ms**
+- Maximum: **15 ms**
+
+mAP@0.50: 0.000, intentionally, because the acquisition server returns no detections.
+
+## Interpretation
+
+The capture-only Level-1 scanner is realtime-safe locally.
+
+Compared with the first real scoring validation, which retained only 146/249 frames, this configuration removes model inference from the critical request path and reduces local latency from approximately 145 ms median to approximately 11 ms.
+
+All requested camera movements are now legal after adding a 1 px safety margin to the movement limit.
+
+The next validation attempt should be treated purely as a data-acquisition run. Its score is expected to be zero.
+
+## Decision
+
+**KEEP — USE FOR REAL VALIDATION DATA ACQUISITION**
+
+Next:
+
+- run one real 249-frame validation attempt
+- retain all received L1 views and metadata
+- measure capture completeness
+- analyze actual validation targets at higher spatial resolution
+- do not run Evaluation

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import sys
 from pathlib import Path
 
@@ -29,43 +30,169 @@ from dtos import (
     RequestedViewDto,
 )
 
-from utils import decode_view
-
 from capture import capture_request
-from model_runtime import detect
 
 
 logger = logging.getLogger(__name__)
 
 
-FULL_CENTER_X = 1920
-FULL_CENTER_Y = 1080
+L1_TARGETS = [
+    (960, 540),
+    (2880, 540),
+    (2880, 1620),
+    (960, 1620),
+]
+
+
+def clamp(
+    value: float,
+    low: float,
+    high: float,
+):
+    return max(
+        low,
+        min(
+            high,
+            value,
+        ),
+    )
+
+
+def get_l1_bounds(
+    request: DroneFlybyPredictRequestDto,
+):
+    for bound in (
+        request
+        .camera_constraints
+        .center_bounds
+    ):
+        if (
+            bound.resolution_level
+            == 1
+        ):
+            return bound
+
+    return None
 
 
 def choose_next_view(
     request: DroneFlybyPredictRequestDto,
 ):
-    # For D019 keep full L0 coverage.
-    if (
-        request.view.resolution_level == 0
-        and request.view.center_x
-        == FULL_CENTER_X
-        and request.view.center_y
-        == FULL_CENTER_Y
-    ):
+    allowed = (
+        request
+        .camera_constraints
+        .allowed_resolution_levels
+    )
+
+    if 1 not in allowed:
         return None
 
-    if (
-        0
-        not in request.camera_constraints
-        .allowed_resolution_levels
-    ):
+    bounds = get_l1_bounds(
+        request
+    )
+
+    if bounds is None:
         return None
+
+    target_index = (
+        request.frame_index
+        % len(L1_TARGETS)
+    )
+
+    target_x, target_y = (
+        L1_TARGETS[
+            target_index
+        ]
+    )
+
+    target_x = clamp(
+        target_x,
+        bounds.minimum_center_x,
+        bounds.maximum_center_x,
+    )
+
+    target_y = clamp(
+        target_y,
+        bounds.minimum_center_y,
+        bounds.maximum_center_y,
+    )
+
+    current_x = (
+        request.view.center_x
+    )
+
+    current_y = (
+        request.view.center_y
+    )
+
+    max_delta = max(
+        0.0,
+        float(
+            request
+            .camera_constraints
+            .maximum_center_delta
+        )
+        - 1.0
+    )
+
+    dx = (
+        target_x
+        - current_x
+    )
+
+    dy = (
+        target_y
+        - current_y
+    )
+
+    distance = math.hypot(
+        dx,
+        dy,
+    )
+
+    if (
+        distance > max_delta
+        and distance > 0
+    ):
+        scale = (
+            max_delta
+            / distance
+        )
+
+        target_x = int(
+            round(
+                current_x
+                + dx * scale
+            )
+        )
+
+        target_y = int(
+            round(
+                current_y
+                + dy * scale
+            )
+        )
+
+    target_x = int(
+        clamp(
+            target_x,
+            bounds.minimum_center_x,
+            bounds.maximum_center_x,
+        )
+    )
+
+    target_y = int(
+        clamp(
+            target_y,
+            bounds.minimum_center_y,
+            bounds.maximum_center_y,
+        )
+    )
 
     return RequestedViewDto(
-        resolution_level=0,
-        center_x=FULL_CENTER_X,
-        center_y=FULL_CENTER_Y,
+        resolution_level=1,
+        center_x=target_x,
+        center_y=target_y,
     )
 
 
@@ -80,31 +207,9 @@ def predict(
 
     except Exception:
         logger.exception(
-            "Capture failed on frame %s",
+            "Capture failed frame=%s",
             request.frame,
         )
-
-    try:
-        image = decode_view(
-            request.view
-        )
-
-        annotations = detect(
-            image,
-            original_width=
-                request.original_width,
-
-            original_height=
-                request.original_height,
-        )
-
-    except Exception:
-        logger.exception(
-            "Model failed on frame %s",
-            request.frame,
-        )
-
-        annotations = []
 
     return DroneFlybyPredictResponseDto(
         request_id=
@@ -113,8 +218,7 @@ def predict(
         frame=
             request.frame,
 
-        annotations=
-            annotations,
+        annotations=[],
 
         requested_view=
             choose_next_view(

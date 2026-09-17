@@ -1798,3 +1798,110 @@ Next:
 - measure capture completeness
 - analyze actual validation targets at higher spatial resolution
 - do not run Evaluation
+
+---
+
+---
+
+# EXP-D023 — Real-validation L1 proposal visual audit
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+Although the Helsinki-trained objectness detector has low activation on the real validation domain, its L1 proposals might still contain a useful fraction of true challenge targets.
+
+If true, localization could be retained while recognition/domain adaptation was rebuilt.
+
+If false, the Helsinki objectness detector should be discarded as the primary localization mechanism.
+
+## Data
+
+Validation acquisition sequence:
+
+`3224a582bfbf4273a028497662b7aa7c`
+
+- Captured requests: 196 / 249
+- Coverage: 78.7%
+- L1 views: 194
+- L0 views: 2
+- Sequence coverage: frame_index 0–248
+
+Major L1 camera positions:
+
+- (1920,1080): 41
+- (960,540): 37
+- (960,1620): 29
+- (2880,1620): 26
+- (2880,540): 24
+
+## Change
+
+Ran the EXP-D010 matched tiled YOLO objectness detector on all retained L1 validation views.
+
+Configuration:
+
+- YOLO confidence: 0.025
+- 2x2 matched tiling
+- NMS IoU: 0.50
+- maximum 20 retained proposals/frame
+- context-expanded proposal crops
+- ranked visual montage
+
+## Results
+
+- L1 frames audited: **194**
+- Proposal crops produced: **673**
+- Mean retained proposals/L1 frame: **3.47**
+
+Visual inspection of the ranked proposal montage shows that the detector fires predominantly on background structures and textures, including:
+
+- vegetation and forest patches
+- roads and road markings
+- roofs and buildings
+- fields / terrain boundaries
+- water / shoreline structure
+- industrial and urban texture
+- other compact high-contrast background features
+
+Only a small minority of proposals appear visually object-like, and there is not enough evidence that these correspond consistently to the sixteen target classes.
+
+## Interpretation
+
+The Helsinki-trained detector does not provide a sufficiently reliable localization prior on the real validation domain.
+
+The validation failure is therefore not simply:
+
+`good boxes + bad classification`
+
+It is primarily:
+
+`poor validation-domain localization + poor class generalization`
+
+The detector has learned Helsinki-specific appearance and background correlations rather than a generic concept of challenge-object objectness.
+
+Using DINO or MobileNet to classify all 673 YOLO proposals would spend substantial compute on mostly irrelevant background crops and would still cap recall at the detector's poor localization recall.
+
+The EXP-D010 YOLO detector should therefore not be used as the foundation of the next system.
+
+It may remain useful later as one weak proposal source in an ensemble, but not as the primary candidate generator.
+
+## Decision
+
+**DISCARD as primary localization mechanism.**
+
+Do not:
+
+- further tune YOLO thresholds on this detector
+- retrain the classifier around these proposals
+- build tracking around these proposals
+- optimize the existing Helsinki YOLO architecture further
+
+Next priority:
+
+**EXP-D024 — validation-domain temporal object discovery.**
+
+Use the retained sequential L1 imagery itself to discover persistent or repeated compact objects without relying on the Helsinki-trained detector.
+TBD

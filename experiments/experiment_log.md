@@ -284,4 +284,35 @@
 **Interpretation:** More conservative movement improved seed 404 and raised consistency, but substantially reduced performance on four of five development seeds. Reduced exploration/food acquisition appears to cost more than the saved movement energy.
 
 **Decision:** DISCARD as primary policy. Do not run full 10-seed benchmark. Investigate individual energy-efficiency changes separately.
+
+---
+
+## EXP-S009 — Precise fruit approach
+
+**Challenge:** Survival Simulator
+
+**Hypothesis:** Matching requested movement distance to fruit distance while leaving S007 exploration unchanged will reduce wasted movement energy without harming food acquisition.
+
+**Change made:**
+- retained S007 predator handling, reproduction, stuck recovery, and exploration
+- added biome-adjusted requested distance for nearby fruit
+- capped requested movement to estimated distance needed to reach the fruit
+
+**Validation:** 5-seed development screen:
+101, 202, 303, 404, 606
+
+**Results:**
+- Mean score: 705.0054
+- Median score: 712.6049
+- Min score: 388.1133
+- Max score: 1009.5132
+- Mean survival: 696.90 s
+- Median survival: 722.80 s
+- Min survival: 371.90 s
+- Max survival: 1026.20 s
+
+**Interpretation:** Precise biome-adjusted fruit movement caused a large regression on four of five seeds. The energy savings do not compensate for degraded fruit acquisition/navigation.
+
+**Decision:** DISCARD. Keep S007 as primary policy.
+
 ---

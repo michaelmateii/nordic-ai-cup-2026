@@ -859,3 +859,80 @@ At this point further detector architecture tuning has lower expected value than
 Use `conf=0.005` as the high-recall proposal operating point for the first complete detection + classification pipeline.
 
 ---
+
+---
+
+# EXP-D012 — Tiled YOLO + batched DINO first complete CV pipeline
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+The high-recall tiled YOLO detector from EXP-D011 combined with frozen DINOv2 recognition should produce a meaningful 16-class AP@0.50 score without task-specific semantic detector training.
+
+**Change:**  
+Pipeline:
+1. 2x2 matched tiled YOLO11n localization at conf=0.005.
+2. Map/NMS proposals into Level 0 coordinates.
+3. Pad proposal crops by 20%.
+4. Embed all frame proposals in one batched DINOv2-small forward pass.
+5. Classify by cosine similarity to per-class prototypes built only from training frames 0–20.
+6. Score class-specific AP@0.50 on holdout frames 22–24.
+
+**Validation:**  
+Temporal holdout frames 22–24.
+
+Same physical identities occur in training and holdout, so this remains a pipeline feasibility estimate rather than cross-scene generalization.
+
+Metrics:
+- macro mAP@0.50
+- per-class AP@0.50
+- proposal count
+- YOLO latency
+- batched DINO latency
+- total per-frame latency
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+- Macro mAP@0.50: 0.6842
+- Mean proposals/frame: 23.0
+
+### Per-class AP@0.50
+
+| Class | AP@0.50 |
+|---|---:|
+| hangar | 0.0000 |
+| jet_plane | 1.0000 |
+| large_launcher | 1.0000 |
+| large_tower | 1.0000 |
+| medium_launcher | 0.5050 |
+| medium_plane | 0.3366 |
+| small_launcher | 1.0000 |
+| spacecraft | 0.0000 |
+| ta-ta | 1.0000 |
+| tank | 1.0000 |
+
+### Latency
+
+- YOLO median: 89.4 ms
+- Batched DINO median: 277.5 ms
+- Total median: 389.0 ms
+- Total max: 410.6 ms
+
+**Interpretation:**  
+The two-stage detector + recognizer architecture is effective: macro AP reaches 0.6842 on the temporal holdout, and classes successfully localized by the tiled detector are generally classified correctly.
+
+The limiting factor is now runtime rather than recognition quality. Batched DINOv2-small adds approximately 278 ms/frame, causing total inference to exceed the approximately 333 ms frame interval.
+
+Per-class AP closely follows localization recall, confirming that improving or accelerating classification is more valuable than further DINO representation work.
+
+**Decision:** KEEP architecture / REPLACE recognizer for realtime deployment.
+
+Retain DINOv2 as a reference recognizer and potential occasional high-confidence fallback. Test a much lighter crop classifier next.
+
+---
+

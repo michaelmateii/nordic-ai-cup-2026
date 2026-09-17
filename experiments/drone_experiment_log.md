@@ -2946,3 +2946,653 @@ Proceed to EXP-D028D:
 - merge accepted pseudo-labels with the 44 manual seeds
 - deduplicate the canonical real-domain annotation set
 - then train the first real-validation-domain detector
+
+---
+
+# EXP-D028D — Human audit of expanded cycle-consistent pseudo-labels
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+Cycle-consistent propagation from the expanded 44-seed validation set can generate a substantially larger real-domain training set while retaining high precision after human verification.
+
+## Input
+
+EXP-D028C produced:
+
+- raw forward matches: 97
+- cycle-consistent matches: 93
+- deduplicated pseudo-labels: 82
+- trusted candidates: 46
+- audit-only candidates: 36
+
+## Change
+
+All 82 pseudo-label candidates were manually reviewed.
+
+A candidate was accepted only if:
+
+- the semantic class was correct
+- the propagated bounding box correctly localized the object
+
+## Results
+
+- Reviewed: **82 / 82**
+- Accepted: **79**
+- Rejected: **3**
+- Acceptance rate: **96.3%**
+
+Accepted per class:
+
+| Class | Accepted |
+|---|---:|
+| hangar | 3 |
+| helicopter | 7 |
+| jet_plane | 4 |
+| large_launcher | 2 |
+| large_tower | 12 |
+| medium_launcher | 2 |
+| medium_plane | 2 |
+| mine_roller | 3 |
+| small_plane | 10 |
+| small_tower | 9 |
+| tank | 25 |
+
+Combined with the 44 manual annotations:
+
+- manual labels: 44
+- accepted propagated labels: 79
+- **123 real-domain labels before final deduplication**
+
+Real-validation class coverage remains:
+
+- **11 / 16 classes**
+
+Classes still uncovered:
+
+- condor
+- jammer
+- small_launcher
+- spacecraft
+- ta-ta
+
+## Interpretation
+
+Cycle-consistent local propagation remains highly reliable after expanding to more classes and more manual seeds.
+
+The acceptance rate decreased only slightly from EXP-D027E:
+
+- EXP-D027E: 98.1%
+- EXP-D028D: 96.3%
+
+This confirms that the validation-domain propagation strategy scales beyond the original tank/large-tower subset.
+
+The current dataset is now large enough to train a first real-domain detector and measure performance on held-out manual labels.
+
+## Decision
+
+**KEEP — BUILD FIRST REAL-DOMAIN DETECTOR**
+
+Proceed to EXP-D029:
+
+1. merge manual + accepted pseudo-labels
+2. deduplicate overlapping boxes
+3. preserve manual labels over pseudo-labels
+4. split validation frames temporally into train/holdout
+5. train a multi-class detector on real validation imagery
+6. evaluate only on held-out real-domain manual labels
+
+---
+
+# EXP-D029 — Canonical real-validation-domain dataset
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+The manually labeled validation seeds and human-approved propagated pseudo-labels can be merged into a sufficiently clean canonical real-domain dataset to support the first detector trained directly on the validation distribution.
+
+## Input
+
+Manual validation annotations:
+
+- 44 boxes
+- 27 labeled frames
+- 11 / 16 classes represented
+
+Accepted propagated pseudo-labels from EXP-D028D:
+
+- 79 boxes
+- 96.3% human acceptance rate before merge
+
+Raw combined supervision before deduplication:
+
+- 44 manual
+- 79 pseudo
+- **123 boxes**
+
+Manual annotations were given priority whenever a pseudo-label overlapped the same class/object.
+
+## Change
+
+Built a canonical annotation set by:
+
+1. loading all 44 manual labels
+2. loading all 79 accepted propagated labels
+3. grouping annotations by frame
+4. preserving manual annotations over conflicting pseudo-labels
+5. removing same-class duplicates at high IoU
+6. retaining the original L1 validation imagery
+
+Initial plan:
+
+- late temporal block for validation
+- remaining labeled frames for training
+
+## Results
+
+After deduplication:
+
+- Canonical boxes: **115**
+- Manual boxes: **44**
+- Pseudo boxes retained: **71**
+
+Initial temporal split:
+
+- Train frames: **63**
+- Validation frames: **14**
+
+### Initial training class counts
+
+- hangar: 5
+- helicopter: 9
+- jet_plane: 6
+- large_launcher: 3
+- large_tower: 12
+- medium_launcher: 3
+- medium_plane: 4
+- mine_roller: 5
+- small_plane: 17
+- small_tower: 12
+- tank: 22
+
+### Initial validation class counts
+
+- large_launcher: 1
+- large_tower: 5
+- tank: 11
+
+## Interpretation
+
+The canonical merge succeeded and produced 115 high-confidence real-domain boxes.
+
+However, the initial late temporal holdout was unsuitable for model evaluation because only **3 of the 11 covered classes** appeared in validation:
+
+- large_launcher
+- large_tower
+- tank
+
+A detector score from this split would therefore provide little information about the remaining covered classes.
+
+A naive random split was also rejected because neighboring pseudo-labels frequently represent the same physical instance and would create severe temporal leakage.
+
+## Decision
+
+**KEEP canonical dataset, REJECT initial split.**
+
+Proceed to EXP-D029A:
+
+- construct a manual-object holdout
+- exclude neighboring propagated labels around held-out objects
+- maximize class coverage while minimizing same-instance leakage
+- evaluate detector recall against manually labeled objects rather than incomplete frame-level annotations
+
+---
+
+# EXP-D029A — Leakage-aware manual-object holdout
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+A manually selected, leakage-aware holdout can provide a substantially more trustworthy estimate of real-domain detector generalization than either:
+
+- the sparse late temporal block, or
+- a random train/validation split.
+
+The holdout should preserve manual target boxes while excluding nearby propagated versions of the same class/object from training.
+
+## Split design
+
+Canonical dataset:
+
+- 115 boxes
+
+Holdout policy:
+
+- use only manually annotated objects as evaluation targets
+- exclude all annotations from held-out frames
+- exclude pseudo-labels of the same class within ±10 frame indices of each held-out manual object
+- preserve as much remaining training supervision as possible
+
+Initial automated holdout selection produced:
+
+- Training boxes: 50
+- Training frames: 41
+- Holdout manual boxes: 14
+- Holdout frames: 12
+- Nearby pseudo-labels excluded: 39
+
+However, this first selection left:
+
+- hangar: 0 training examples
+- large_launcher: 0 training examples
+
+and was therefore rejected before training.
+
+## Holdout candidate-cost analysis
+
+Every manually labeled candidate was evaluated for how many same-class training examples would be lost under the ±10-frame leakage exclusion.
+
+This showed that several holdout choices were substantially cheaper than others.
+
+Examples:
+
+- large_launcher frame 162:
+  - remaining training examples: 1
+
+- large_launcher frame 205:
+  - remaining training examples: 3
+
+- helicopter frame 66:
+  - remaining: 4
+
+- helicopter frame 107:
+  - remaining: 5
+
+- mine_roller frame 14:
+  - remaining: 4
+
+- mine_roller frame 92:
+  - remaining: 1
+
+The holdout was therefore changed from automatic evenly spaced selection to explicit manually chosen objects.
+
+## Final explicit holdout
+
+Selected manual objects:
+
+### Frame 125
+
+- hangar
+- jet_plane
+- small_plane
+- small_plane
+
+### Frame 107
+
+- helicopter
+- large_tower
+
+### Frame 205
+
+- large_launcher
+- tank
+
+### Frame 82
+
+- medium_plane
+- tank
+
+### Frame 14
+
+- mine_roller
+
+### Frame 182
+
+- small_tower
+
+### Frame 186
+
+- small_tower
+
+### Frame 222
+
+- large_tower
+
+This yields:
+
+- **14 held-out manual objects**
+- **8 held-out frames**
+- **10 evaluated classes**
+
+## Final split results
+
+- Canonical boxes: **115**
+- Training boxes: **67**
+- Training frames: **54**
+- Holdout manual boxes: **14**
+- Holdout frames: **8**
+- Pseudo-labels excluded near holdout: **31**
+
+### Training counts
+
+- hangar: 1
+- helicopter: 5
+- jet_plane: 3
+- large_launcher: 3
+- large_tower: 11
+- medium_launcher: 2
+- medium_plane: 1
+- mine_roller: 4
+- small_plane: 6
+- small_tower: 8
+- tank: 23
+
+### Manual holdout counts
+
+- hangar: 1
+- helicopter: 1
+- jet_plane: 1
+- large_launcher: 1
+- large_tower: 2
+- medium_plane: 1
+- mine_roller: 1
+- small_plane: 2
+- small_tower: 2
+- tank: 2
+
+## Interpretation
+
+The revised holdout is substantially more useful than the original temporal block.
+
+Advantages:
+
+- 10 covered classes are evaluated
+- only 8 frames are removed
+- nearby pseudo-label leakage is explicitly reduced
+- strong classes retain substantial training supervision
+- large_launcher and helicopter now retain usable training data
+
+Two classes remain intrinsically data-limited:
+
+- hangar: 1 training example
+- medium_plane: 1 training example
+
+Their holdout results must therefore be interpreted cautiously.
+
+The holdout is intentionally object-centric rather than conventional full-frame mAP evaluation because the retained validation imagery is incompletely annotated.
+
+A real but unlabeled detection should not be automatically counted as a false positive.
+
+## Decision
+
+**KEEP — USE AS AUTHORITATIVE INTERNAL HOLDOUT**
+
+EXP-D029B will train on the 67 leakage-reduced training boxes.
+
+EXP-D029C will evaluate the trained detector only against the 14 manually held-out objects using correct-class IoU >= 0.50.
+
+---
+
+# EXP-D029B — First real-validation-domain detector
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+A YOLO11n detector fine-tuned directly on clean real-validation-domain supervision should generalize substantially better to unseen validation objects than the previous Helsinki-trained detector.
+
+## Training data
+
+Leakage-aware EXP-D029A training set:
+
+- Training frames: **54**
+- Training boxes: **67**
+- Classes represented in training: **11**
+
+Training class counts:
+
+- hangar: 1
+- helicopter: 5
+- jet_plane: 3
+- large_launcher: 3
+- large_tower: 11
+- medium_launcher: 2
+- medium_plane: 1
+- mine_roller: 4
+- small_plane: 6
+- small_tower: 8
+- tank: 23
+
+Classes still completely absent from real-domain supervision:
+
+- condor
+- jammer
+- small_launcher
+- spacecraft
+- ta-ta
+
+## Model
+
+Base model:
+
+- `yolo11n.pt`
+
+Device:
+
+- Apple M1 MPS
+
+Training configuration:
+
+- image size: 960
+- batch size: 4
+- epochs: 80
+- pretrained weights: yes
+- horizontal flip: 0.5
+- vertical flip: 0.0
+- rotation: 3 degrees
+- translation: 0.05
+- scale augmentation: 0.15
+- mosaic: 0.25
+- mixup: 0.0
+- copy-paste: 0.0
+- seed: 42
+
+## Training setup correction
+
+Ultralytics requires detection dataset YAML files to contain both `train:` and `val:` entries.
+
+The first training launch failed before optimization because the leakage-aware dataset intentionally contained no conventional validation split.
+
+The YAML was therefore given:
+
+`val: images/train`
+
+only to satisfy Ultralytics dataset-schema requirements.
+
+The authoritative evaluation remains the independent manual holdout from EXP-D029A.
+
+## Training result
+
+Training completed successfully.
+
+Final model:
+
+`drone/artifacts/exp_d029b/runs/yolo11n_validation_domain/weights/last.pt`
+
+Model:
+
+- YOLO11n
+- parameters: **2,585,272**
+- GFLOPs: **6.4**
+
+Ultralytics reported the following metrics on the 54 training images:
+
+- Precision: **0.859**
+- Recall: **0.878**
+- mAP@0.50: **0.859**
+- mAP@0.50:0.95: **0.661**
+
+Per-class training-set mAP@0.50:
+
+- hangar: 0.497
+- helicopter: 0.995
+- jet_plane: 0.995
+- large_launcher: 0.995
+- large_tower: 0.995
+- medium_launcher: 0.190
+- medium_plane: 0.995
+- mine_roller: 0.995
+- small_plane: 0.924
+- small_tower: 0.872
+- tank: 0.995
+
+Reported inference speed during this internal pass:
+
+- preprocess: 0.3 ms/image
+- inference: 7.3 ms/image
+- postprocess: 13.0 ms/image
+
+## Interpretation
+
+The model clearly fit most of the real-domain training classes, which confirms that the 67-box dataset is learnable.
+
+However, these Ultralytics metrics are **resubstitution metrics on the training images** and must not be interpreted as evidence of real-domain generalization.
+
+Several effects are visible even on the training set:
+
+- medium_launcher remains weak, consistent with only two training examples
+- hangar remains weak, consistent with only one training example
+- most better-represented classes are fit nearly perfectly
+
+The decisive question is now whether the detector generalizes to the 14 manually held-out objects that were explicitly protected from local pseudo-label leakage.
+
+## Decision
+
+**KEEP — PROCEED TO INDEPENDENT HOLDOUT EVALUATION**
+
+EXP-D029C is the authoritative model-selection experiment.
+
+---
+
+# EXP-D029C — Leakage-aware real-domain detector holdout evaluation
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+If validation-domain manual annotation and cycle-consistent pseudo-label propagation successfully solve the domain-shift problem, the EXP-D029B detector should recover a substantial fraction of genuinely held-out real-validation objects.
+
+## Model
+
+Checkpoint:
+
+`drone/artifacts/exp_d029b/runs/yolo11n_validation_domain/weights/last.pt`
+
+Model:
+
+- YOLO11n
+- trained directly on real validation-domain imagery
+- 67 training boxes
+- 54 training frames
+- 11 represented classes
+
+## Holdout
+
+Leakage-aware manual holdout from EXP-D029A:
+
+- **14 manually annotated objects**
+- **8 held-out frames**
+- **10 classes**
+- neighboring same-class pseudo-labels within ±10 frames excluded from training
+
+Success criterion:
+
+- correct semantic class
+- IoU >= 0.50
+
+Confidence thresholds tested:
+
+- 0.001
+- 0.005
+- 0.01
+- 0.025
+- 0.05
+- 0.10
+- 0.20
+
+## Results
+
+Best operating point:
+
+- Confidence: **0.001**
+- Recall @ IoU0.50: **0.786**
+- Correctly recovered held-out objects: **11 / 14**
+- Mean proposals/frame: **42.4**
+- Median inference latency: **17.5 ms**
+
+Results:
+
+`drone/artifacts/exp_d029c/holdout_results.json`
+
+## Interpretation
+
+The detector generalizes strongly beyond the real-domain objects used for training.
+
+Recovering 11 of 14 manually held-out objects after explicit temporal leakage reduction provides much stronger evidence of useful generalization than the earlier Helsinki-based experiments.
+
+This validates the central pivot of the project:
+
+`Helsinki supervision -> validation domain`
+
+was weak, while:
+
+`manual validation seeds -> local propagation -> verified pseudo-labels -> validation-domain detector`
+
+is effective.
+
+The detector is also computationally practical.
+
+At the best recall operating point:
+
+- median model latency is only 17.5 ms
+- 42.4 predictions/frame remain manageable for post-processing
+- there is substantial headroom relative to the 3333 ms request timeout
+
+The remaining major limitation is class coverage.
+
+Five of sixteen competition classes still have no real-domain supervision:
+
+- condor
+- jammer
+- small_launcher
+- spacecraft
+- ta-ta
+
+Therefore the detector's overall competition ceiling is still limited even though performance on represented classes is promising.
+
+## Decision
+
+**KEEP — FIRST SUCCESSFUL REAL-DOMAIN DETECTOR**
+
+EXP-D029 establishes validation-domain annotation and training as the primary strategy.
+
+Next priorities:
+
+1. inspect the three missed holdout objects and per-class recall
+2. determine whether a slightly higher confidence threshold preserves recall while reducing predictions/frame
+3. integrate the real-domain detector into the competition endpoint
+4. run another real validation attempt before evaluation
+5. continue targeted annotation for the five still-uncovered classes if time permits

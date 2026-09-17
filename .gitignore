@@ -57,6 +57,12 @@ outputs/predictions/*
 wandb/
 runs/
 
+# Nordic AI Cup — Drone Flyby generated/reference data
+drone/reference/
+drone/captures/
+drone/artifacts/
+drone/models/
+
 # Medical challenge generated artifacts
 medical/artifacts/
 

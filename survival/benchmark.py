@@ -5,6 +5,8 @@ import json
 import random
 import statistics
 import subprocess
+import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -182,6 +184,27 @@ def run_simulation(
                 "survival_time": float(sim.env.time),
                 "trace": trace_rows,
             }
+            
+def run_seed_job(job):
+    """
+    Run one seed in an isolated worker process.
+
+    Loading and resetting the controller inside the worker prevents
+    policy memory from leaking between seeds.
+    """
+
+    seed, controller_name = job
+
+    controller = load_controller(controller_name)
+
+    if hasattr(controller, "reset_policy_state"):
+        controller.reset_policy_state()
+
+    return run_simulation(
+        seed=seed,
+        action_decision=controller.action_decision,
+        trace=False,
+    )
 
 
 def calculate_summary(results):
@@ -348,6 +371,16 @@ def main():
             "Example: --seeds 303 404"
         ),
     )
+    
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of parallel seed workers. "
+            "Use 1 for diagnostics/trace and 4 for normal benchmarks."
+        ),
+    )
 
     parser.add_argument(
         "--trace",
@@ -358,6 +391,11 @@ def main():
     )
 
     args = parser.parse_args()
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
+
+    if args.trace and args.workers != 1:
+        parser.error("--trace requires --workers 1")
 
     controller = load_controller(
         args.controller
@@ -382,30 +420,69 @@ def main():
     print(
         f"Seeds: {args.seeds}"
     )
+    print(
+        f"Workers: {args.workers}"
+    )
     print("=" * 60)
 
     results = []
 
-    for index, seed in enumerate(
-        args.seeds,
-        start=1,
-    ):
-        if hasattr(controller, "reset_policy_state"):
-            controller.reset_policy_state()
-        result = run_simulation(
-            seed=seed,
-            action_decision=controller.action_decision,
-            trace=args.trace,
-        )
+    wall_start = time.perf_counter()
 
-        results.append(result)
+    if args.workers == 1:
+        for index, seed in enumerate(
+            args.seeds,
+            start=1,
+        ):
+            if hasattr(
+                controller,
+                "reset_policy_state",
+            ):
+                controller.reset_policy_state()
 
-        print(
-            f"[{index:02d}/{len(args.seeds)}] "
-            f"seed={result['seed']} "
-            f"score={result['score']:.4f} "
-            f"time={result['survival_time']:.1f}s"
-        )
+            result = run_simulation(
+                seed=seed,
+                action_decision=controller.action_decision,
+                trace=args.trace,
+            )
+
+            results.append(result)
+
+            print(
+                f"[{index:02d}/{len(args.seeds)}] "
+                f"seed={result['seed']} "
+                f"score={result['score']:.4f} "
+                f"time={result['survival_time']:.1f}s"
+            )
+
+    else:
+        jobs = [
+            (seed, args.controller)
+            for seed in args.seeds
+        ]
+
+        with ProcessPoolExecutor(
+            max_workers=args.workers
+        ) as executor:
+            for index, result in enumerate(
+                executor.map(
+                    run_seed_job,
+                    jobs,
+                ),
+                start=1,
+            ):
+                results.append(result)
+
+                print(
+                    f"[{index:02d}/{len(args.seeds)}] "
+                    f"seed={result['seed']} "
+                    f"score={result['score']:.4f} "
+                    f"time={result['survival_time']:.1f}s"
+                )
+
+    wall_elapsed = (
+        time.perf_counter() - wall_start
+    )
 
     summary = calculate_summary(results)
 
@@ -463,6 +540,12 @@ def main():
     print(
         f"Max survival:    "
         f"{summary['max_survival']:.2f}s"
+    )
+    
+    print()
+    print(
+        f"Wall-clock runtime: "
+        f"{wall_elapsed:.2f}s"
     )
 
     (

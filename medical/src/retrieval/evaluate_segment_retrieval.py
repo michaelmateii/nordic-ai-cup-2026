@@ -1,0 +1,420 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+
+DEFAULT_QUESTION_CSV = Path(
+    r"C:\Users\Calle\Projects\Nordic-AI-Cup-2026-official"
+    r"\medical-appointment\data\question_train.csv"
+)
+
+DEFAULT_ASR_DIR = Path(
+    r"medical\artifacts\asr\faster_distil_large_v3_int8f32_b1"
+)
+
+DEFAULT_OUTPUT = Path(
+    r"medical\artifacts\retrieval\segment_tfidf_results.csv"
+)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--questions",
+        type=Path,
+        default=DEFAULT_QUESTION_CSV,
+    )
+
+    parser.add_argument(
+        "--asr-dir",
+        type=Path,
+        default=DEFAULT_ASR_DIR,
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+    )
+
+    return parser.parse_args()
+
+
+def temporal_iou(
+    pred_start: float,
+    pred_end: float,
+    gold_start: float,
+    gold_end: float,
+) -> float:
+    intersection = max(
+        0.0,
+        min(pred_end, gold_end)
+        - max(pred_start, gold_start),
+    )
+
+    union = (
+        max(pred_end, gold_end)
+        - min(pred_start, gold_start)
+    )
+
+    if union <= 0:
+        return 0.0
+
+    return intersection / union
+
+def normalize_transcript_id(value: object) -> str:
+    text = str(value).strip()
+
+    if text.endswith(".0") and text[:-2].isdigit():
+        text = text[:-2]
+
+    text = Path(text).stem
+
+    if text.startswith("conversation_sample_"):
+        return text
+
+    if text.startswith("sample_"):
+        return f"conversation_{text}"
+
+    if text.isdigit():
+        return f"conversation_sample_{int(text)}"
+
+    return text
+
+
+def resolve_asr_path(
+    asr_dir: Path,
+    transcript_id: object,
+) -> Path:
+    stem = normalize_transcript_id(transcript_id)
+
+    direct = asr_dir / f"{stem}.json"
+
+    if direct.exists():
+        return direct
+
+    matches = list(asr_dir.glob(f"*{stem}*.json"))
+
+    if len(matches) == 1:
+        return matches[0]
+
+    raise FileNotFoundError(
+        f"Could not uniquely resolve ASR JSON for "
+        f"transcript_id={transcript_id!r}. "
+        f"Expected {direct}"
+    )
+
+
+def load_segments(path: Path) -> list[dict]:
+    data = json.loads(
+        path.read_text(encoding="utf-8")
+    )
+
+    segments = []
+
+    for segment in data["segments"]:
+        text = str(segment["text"]).strip()
+
+        if not text:
+            continue
+
+        segments.append(
+            {
+                "start": float(segment["start"]),
+                "end": float(segment["end"]),
+                "text": text,
+            }
+        )
+
+    if not segments:
+        raise RuntimeError(
+            f"No ASR segments in {path}"
+        )
+
+    return segments
+
+
+def score_candidates(
+    question: str,
+    segments: list[dict],
+) -> np.ndarray:
+    segment_texts = [
+        segment["text"]
+        for segment in segments
+    ]
+
+    documents = segment_texts + [question]
+
+    word_vectorizer = TfidfVectorizer(
+        lowercase=True,
+        ngram_range=(1, 2),
+        sublinear_tf=True,
+        token_pattern=r"(?u)\b\w+\b",
+    )
+
+    word_matrix = word_vectorizer.fit_transform(
+        documents
+    )
+
+    word_scores = cosine_similarity(
+        word_matrix[-1],
+        word_matrix[:-1],
+    )[0]
+
+    char_vectorizer = TfidfVectorizer(
+        lowercase=True,
+        analyzer="char_wb",
+        ngram_range=(3, 5),
+        sublinear_tf=True,
+    )
+
+    char_matrix = char_vectorizer.fit_transform(
+        documents
+    )
+
+    char_scores = cosine_similarity(
+        char_matrix[-1],
+        char_matrix[:-1],
+    )[0]
+
+    scores = (
+        0.55 * word_scores
+        + 0.45 * char_scores
+    )
+
+    return scores
+
+
+def main() -> None:
+    args = parse_args()
+
+    df = pd.read_csv(args.questions)
+
+    required_columns = {
+        "question_id",
+        "transcript_id",
+        "question",
+        "question_type",
+        "evidence_start",
+        "evidence_end",
+    }
+
+    missing = required_columns - set(df.columns)
+
+    if missing:
+        raise ValueError(
+            f"Missing expected CSV columns: {sorted(missing)}"
+        )
+
+    positives = df[
+        df["question_type"] == "positive"
+    ].copy()
+
+    results = []
+
+    cache: dict[str, list[dict]] = {}
+
+    for _, row in positives.iterrows():
+        transcript_id = row["transcript_id"]
+
+        stem = normalize_transcript_id(
+            transcript_id
+        )
+
+        if stem not in cache:
+            asr_path = resolve_asr_path(
+                args.asr_dir,
+                transcript_id,
+            )
+
+            cache[stem] = load_segments(
+                asr_path
+            )
+
+        segments = cache[stem]
+
+        question = str(row["question"])
+
+        gold_start = float(
+            row["evidence_start"]
+        )
+        gold_end = float(
+            row["evidence_end"]
+        )
+
+        scores = score_candidates(
+            question,
+            segments,
+        )
+
+        ranking = np.argsort(scores)[::-1]
+
+        top_index = int(ranking[0])
+        top = segments[top_index]
+
+        top_iou = temporal_iou(
+            top["start"],
+            top["end"],
+            gold_start,
+            gold_end,
+        )
+
+        candidate_ious = np.array(
+            [
+                temporal_iou(
+                    segment["start"],
+                    segment["end"],
+                    gold_start,
+                    gold_end,
+                )
+                for segment in segments
+            ],
+            dtype=float,
+        )
+
+        oracle_segment_iou = float(
+            candidate_ious.max()
+        )
+
+        def top_k_overlap(k: int) -> bool:
+            indices = ranking[:k]
+
+            return bool(
+                np.any(
+                    candidate_ious[indices] > 0
+                )
+            )
+
+        results.append(
+            {
+                "question_id": row["question_id"],
+                "transcript_id": transcript_id,
+                "question": question,
+                "gold_start": gold_start,
+                "gold_end": gold_end,
+                "pred_start": top["start"],
+                "pred_end": top["end"],
+                "pred_text": top["text"],
+                "retrieval_score": float(
+                    scores[top_index]
+                ),
+                "tiou": top_iou,
+                "oracle_segment_tiou": (
+                    oracle_segment_iou
+                ),
+                "top1_overlap": top_k_overlap(1),
+                "top3_overlap": top_k_overlap(3),
+                "top5_overlap": top_k_overlap(5),
+            }
+        )
+
+    result_df = pd.DataFrame(results)
+
+    args.output.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    result_df.to_csv(
+        args.output,
+        index=False,
+        quoting=csv.QUOTE_MINIMAL,
+    )
+
+    tiou = result_df["tiou"]
+
+    print("=" * 78)
+    print(
+        "Nordic AI Cup 2026 — "
+        "Positive Evidence Retrieval Baseline"
+    )
+    print("=" * 78)
+    print(
+        f"Gold-positive questions: "
+        f"{len(result_df)}"
+    )
+    print()
+
+    print("TOP-1 LOCALIZATION")
+    print("-" * 78)
+    print(
+        f"Mean tIoU:       "
+        f"{tiou.mean():.4f}"
+    )
+    print(
+        f"Median tIoU:     "
+        f"{tiou.median():.4f}"
+    )
+    print(
+        f"Any overlap:     "
+        f"{(tiou > 0).mean():.4f}"
+    )
+    print(
+        f"tIoU >= 0.25:    "
+        f"{(tiou >= 0.25).mean():.4f}"
+    )
+    print(
+        f"tIoU >= 0.50:    "
+        f"{(tiou >= 0.50).mean():.4f}"
+    )
+    print(
+        f"tIoU >= 0.75:    "
+        f"{(tiou >= 0.75).mean():.4f}"
+    )
+    print()
+
+    print("RETRIEVAL RECALL")
+    print("-" * 78)
+    print(
+        "R@1 any overlap: "
+        f"{result_df['top1_overlap'].mean():.4f}"
+    )
+    print(
+        "R@3 any overlap: "
+        f"{result_df['top3_overlap'].mean():.4f}"
+    )
+    print(
+        "R@5 any overlap: "
+        f"{result_df['top5_overlap'].mean():.4f}"
+    )
+    print()
+
+    print("SEGMENTATION CEILING")
+    print("-" * 78)
+    print(
+        "Oracle single-segment mean tIoU: "
+        f"{result_df['oracle_segment_tiou'].mean():.4f}"
+    )
+    print(
+        "Oracle single-segment median tIoU: "
+        f"{result_df['oracle_segment_tiou'].median():.4f}"
+    )
+    print()
+
+    failures = result_df[
+        result_df["tiou"] == 0
+    ]
+
+    print(
+        f"Top-1 zero-overlap failures: "
+        f"{len(failures)}"
+    )
+
+    print()
+    print(
+        f"Detailed results: {args.output}"
+    )
+
+
+if __name__ == "__main__":
+    main()
+    

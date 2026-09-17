@@ -562,3 +562,458 @@ Freeze `faster-whisper distil-large-v3 / CUDA int8_float32 / beam=1` as the prim
 
 Next experiment: evaluate timestamp-aware evidence retrieval against the 195 gold-positive evidence intervals.
 
+---
+
+## EXP-M006 — TF-IDF Segment Evidence Retrieval
+
+### Hypothesis
+
+A simple lexical retrieval baseline over timestamped faster-whisper segments should establish how much positive-evidence localization is possible without semantic reranking or word-level span refinement.
+
+### Configuration
+
+Input:
+
+* cached faster-whisper transcripts from EXP-M005
+* only the 195 gold-positive training questions
+
+Candidate units:
+
+* faster-whisper ASR segments
+
+Retrieval:
+
+* word TF-IDF with 1–2 grams
+* character TF-IDF with 3–5 grams
+* combined score:
+
+  * 0.55 word similarity
+  * 0.45 character similarity
+
+No question-answer classification was performed.
+
+### Results
+
+Gold-positive questions:
+
+195
+
+Top-1 localization:
+
+* mean tIoU: 0.4016
+* median tIoU: 0.4029
+* any-overlap rate: 0.6718
+* tIoU >= 0.25: 0.5897
+* tIoU >= 0.50: 0.3949
+* tIoU >= 0.75: 0.2615
+
+Retrieval recall:
+
+* R@1 any overlap: 0.6718
+* R@3 any overlap: 0.8513
+* R@5 any overlap: 0.8974
+
+Segmentation ceiling:
+
+* oracle single-segment mean tIoU: 0.6117
+* oracle single-segment median tIoU: 0.5777
+
+Failures:
+
+* top-1 zero-overlap failures: 64 / 195
+
+### Interpretation
+
+The lexical baseline is useful but insufficient.
+
+The increase from 67.2% overlap at rank 1 to 85.1% at rank 3 indicates that candidate generation is substantially stronger than top-1 ranking. A reranker therefore has meaningful potential.
+
+However, even perfect selection among existing ASR segments is limited to only 0.6117 mean tIoU. Whole-segment output therefore imposes a major localization ceiling.
+
+Because evidence localization represents 60% of the competition score, evidence spans must eventually be refined below ASR-segment granularity.
+
+### Decision
+
+KEEP as the first evidence-retrieval baseline.
+
+Next experiment: quantify the oracle localization ceiling using faster-whisper word timestamps.
+
+---
+
+## EXP-M007 — Word Timestamp Localization Ceiling
+
+### Hypothesis
+
+If faster-whisper word timestamps are sufficiently accurate, contiguous word-level evidence windows should permit substantially higher temporal IoU than whole ASR segments.
+
+### Method
+
+Oracle diagnostic over the 195 gold-positive training questions.
+
+For each question:
+
+* load the cached faster-whisper word timestamps
+* search contiguous word windows near the annotated evidence interval
+* select the word-bounded span with maximum temporal IoU against the gold evidence
+
+Gold evidence timestamps are used only for this diagnostic and are not available to or usable by a deployable inference system.
+
+### Results
+
+* gold-positive questions: 195
+* mean oracle word-window tIoU: 0.9294
+* median oracle word-window tIoU: 0.9457
+* minimum oracle word-window tIoU: 0.6316
+* tIoU >= 0.50: 1.0000
+* tIoU >= 0.75: 0.9897
+* tIoU >= 0.90: 0.8051
+
+Previous oracle single-segment mean tIoU:
+
+0.6117
+
+Improvement from word-level boundaries:
+
++0.3177 mean tIoU
+
+### Interpretation
+
+faster-whisper's word timestamps are sufficiently accurate for high-quality evidence localization.
+
+ASR temporal alignment is therefore not currently the dominant localization bottleneck.
+
+The deployable challenge is selecting the correct contiguous word span from the transcript.
+
+Whole ASR segments should not be used as final evidence spans except as fallback behavior.
+
+### Decision
+
+KEEP.
+
+Use word-level evidence spans in the competition system.
+
+Next experiment: lexical retrieval directly over candidate word windows without using gold evidence.
+
+
+---
+
+## EXP-M008 — Global Word-Window Evidence Retrieval
+
+### Hypothesis
+
+Directly ranking fixed-size contiguous word windows against each positive question may improve localization over whole-segment retrieval while retaining word-level timestamp precision.
+
+### Configuration
+
+Candidate word-window sizes:
+
+* 6 words
+* 10 words
+* 14 words
+* 18 words
+* 24 words
+* 32 words
+
+Stride:
+
+2 words
+
+Ranking:
+
+* word TF-IDF 1–2 grams
+* character TF-IDF 3–5 grams
+* 0.55 word similarity
+* 0.45 character similarity
+
+Evaluation used only the 195 gold-positive questions.
+
+### Results
+
+Top-1 localization:
+
+* mean tIoU: 0.3522
+* median tIoU: 0.3600
+* any overlap: 0.7128
+* tIoU >= 0.25: 0.6154
+* tIoU >= 0.50: 0.3282
+* tIoU >= 0.75: 0.1077
+
+Retrieval recall:
+
+* R@1 overlap: 0.7128
+* R@3 overlap: 0.7744
+* R@5 overlap: 0.8051
+* R@10 overlap: 0.8615
+
+Candidate-window ceiling:
+
+* oracle mean tIoU: 0.7609
+* oracle median tIoU: 0.7950
+
+Top-1 zero-overlap failures:
+
+56 / 195
+
+Previous references:
+
+* segment TF-IDF mean tIoU: 0.4016
+* segment TF-IDF R@3: 0.8513
+* unrestricted word timestamp oracle mean tIoU: 0.9294
+
+### Interpretation
+
+Global fixed-size word-window retrieval increases top-1 overlap frequency but reduces mean temporal IoU relative to whole-segment retrieval.
+
+The fixed candidate set also captures only 0.7609 mean oracle tIoU, far below the 0.9294 unrestricted word-boundary ceiling.
+
+This indicates that word timestamps are valuable for local span refinement, but global word windows are not an effective first-stage retrieval unit.
+
+Segment retrieval remains the stronger coarse locator.
+
+### Decision
+
+DISCARD as standalone retrieval architecture.
+
+KEEP the insight that evidence spans must be refined at word level.
+
+Next experiment: coarse segment retrieval followed by local word-level refinement.
+
+---
+
+## EXP-M009 — Coarse-to-Fine TF-IDF Retrieval
+
+### Hypothesis
+
+Segment-level retrieval followed by local word-window refinement may combine the strong coarse recall of ASR segments with the high localization ceiling of word timestamps.
+
+### Configuration
+
+First stage:
+
+* segment-level TF-IDF retrieval
+* top 3 segments retained
+
+Second stage:
+
+* generate local contiguous word windows around those segments
+* window sizes: 4, 6, 8, 10, 12, 16, 20 words
+* local margin: 10 words
+
+Both stages used the same combined lexical score:
+
+* 0.55 word TF-IDF
+* 0.45 character TF-IDF
+
+### Results
+
+Top-1 localization:
+
+* mean tIoU: 0.3117
+* median tIoU: 0.2521
+* any overlap: 0.6256
+* tIoU >= 0.25: 0.5026
+* tIoU >= 0.50: 0.3128
+* tIoU >= 0.75: 0.1179
+
+Retrieval recall:
+
+* R@1 overlap: 0.6256
+* R@3 overlap: 0.7385
+* R@5 overlap: 0.7692
+* R@10 overlap: 0.7949
+
+Local candidate ceiling:
+
+* oracle mean tIoU: 0.7765
+* oracle median tIoU: 0.8974
+
+Top-1 zero-overlap failures:
+
+73 / 195
+
+### Interpretation
+
+The coarse-to-fine decomposition is plausible, but lexical similarity is inadequate for selecting the best local word span.
+
+The large gap between:
+
+* actual mean tIoU: 0.3117
+* local candidate oracle mean tIoU: 0.7765
+
+shows that second-stage ranking, rather than timestamp quality, is the dominant failure in this experiment.
+
+The median oracle value of 0.8974 is especially encouraging: for at least half of positive questions the local candidate pool already contains a highly accurate span.
+
+### Decision
+
+DISCARD TF-IDF as the local reranker.
+
+KEEP coarse-to-fine candidate generation as a candidate architecture.
+
+Next experiment: semantic cross-encoder reranking of segment candidates.
+
+---
+
+## EXP-M010 — Cross-Encoder Segment Reranking
+
+### Hypothesis
+
+A semantic cross-encoder reranker may improve evidence-segment ranking beyond lexical TF-IDF, especially where the question and supporting clinical statement are semantically equivalent but lexically different.
+
+### Configuration
+
+First-stage candidate generation:
+
+* segment-level combined TF-IDF
+* top 8 lexical segments retained
+
+Semantic reranker:
+
+`cross-encoder/ms-marco-MiniLM-L6-v2`
+
+Device:
+
+CUDA
+
+Maximum sequence length:
+
+256
+
+### Results
+
+Gold-positive questions:
+
+195
+
+Top-1 localization:
+
+* mean tIoU: 0.4347
+* median tIoU: 0.4455
+* any overlap: 0.7282
+* tIoU >= 0.25: 0.6462
+* tIoU >= 0.50: 0.4359
+* tIoU >= 0.75: 0.2718
+
+Reranked recall:
+
+* R@1 overlap: 0.7282
+* R@3 overlap: 0.9231
+* R@5 overlap: 0.9436
+
+First-stage top-8 ceiling:
+
+* oracle lexical-top8 mean tIoU: 0.5886
+
+Latency:
+
+* 195-question rerank time: 3.56 s
+* mean per question: 0.0182 s
+
+### Comparison
+
+Previous segment TF-IDF:
+
+* mean tIoU: 0.4016
+* R@1 overlap: 0.6718
+* R@3 overlap: 0.8513
+
+Cross-encoder improvement:
+
+* mean tIoU: +0.0331
+* R@1 overlap: +0.0564
+* R@3 overlap: +0.0718
+
+### Interpretation
+
+Semantic reranking provides a clear measurable improvement over lexical ranking.
+
+The strongest result is the 0.9231 top-3 overlap recall. This means the correct evidence neighborhood is usually present among the top three semantic segments even when it is not ranked first.
+
+The reranker is also extremely cheap relative to the 60-second request budget.
+
+The remaining localization gap is primarily caused by returning whole ASR segments rather than selecting tight word-level evidence spans.
+
+### Decision
+
+KEEP.
+
+Use semantic segment reranking as the coarse retrieval stage.
+
+Next experiment: semantic word-window refinement inside the top cross-encoder segment neighborhoods.
+
+---
+
+## EXP-M011 — Semantic Word-Window Refinement
+
+### Hypothesis
+
+The MS MARCO cross-encoder that improved segment ranking may also identify the tightest supporting word window inside the top semantic evidence neighborhoods.
+
+### Configuration
+
+Coarse retrieval:
+
+* lexical segment retrieval, top 8
+* `cross-encoder/ms-marco-MiniLM-L6-v2` semantic reranking
+* top 3 semantic segments retained
+
+Fine candidate generation:
+
+* local contiguous word windows around the top semantic segments
+* window sizes from 4 to 24 words
+
+Fine reranking:
+
+`cross-encoder/ms-marco-MiniLM-L6-v2`
+
+### Results
+
+Gold-positive questions:
+
+195
+
+Top-1 localization:
+
+* mean tIoU: 0.3612
+* median tIoU: 0.3905
+* any overlap: 0.7538
+* tIoU >= 0.25: 0.6000
+* tIoU >= 0.50: 0.3538
+* tIoU >= 0.75: 0.0923
+
+Window recall:
+
+* R@1 overlap: 0.7538
+* R@3 overlap: 0.7744
+* R@5 overlap: 0.7846
+
+Candidate ceiling:
+
+* oracle local-window mean tIoU: 0.8219
+* oracle local-window median tIoU: 0.9059
+
+Latency:
+
+* word-window pairs scored: 73,837
+* total rerank time: 30.88 s
+* mean per question: 0.1583 s
+* estimated mean per 10-question request: 1.5835 s
+
+### Interpretation
+
+The local candidate pool frequently contains an excellent evidence span, but the MS MARCO passage-ranking cross-encoder does not reliably identify the tightest supporting span.
+
+The model remains useful for coarse segment ranking, where EXP-M010 improved retrieval substantially.
+
+Fine word-window semantic reranking with this model reduces mean tIoU relative to simply returning the best semantic segment.
+
+### Decision
+
+DISCARD as the final word-level reranker.
+
+KEEP EXP-M010 semantic segment retrieval.
+
+Pause further evidence-refinement work and establish the first full YES/NO classifier before investing in another localization model.
+
+---
+

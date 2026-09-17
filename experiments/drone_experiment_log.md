@@ -91,3 +91,88 @@ The realtime baseline processes all 25 frames without skipping any frames. API/e
 **Decision:** KEEP
 
 The evaluator/API infrastructure is trustworthy and should be used as the reference harness for all subsequent Drone experiments.
+
+---
+
+---
+
+# EXP-D002 — Dataset geometry and temporal analysis
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+The supplied Helsinki data contains strong repeated-object temporal structure and several classes that become extremely small at camera level 0. Quantifying object scale and inter-frame movement should determine whether tracking and active zoom deserve priority over conventional frame-independent detection.
+
+**Change:**  
+Added reproducible dataset-analysis tooling in `drone/scripts/analyze_dataset.py`.
+
+**Validation:**  
+Parsed all supplied Helsinki annotations and measured class frequency, box dimensions at L0/L1/L2, and consecutive-frame object motion.
+
+**Hardware:**  
+MacBook Air M1
+
+## Results
+
+- Annotated frames: 25
+- Total labeled boxes: 259
+- Classes: 16
+- Physical identities: 16, one per class
+- Consecutive-frame motion comparisons: 243
+- Median global dx: +1.0 source px/frame
+- Median global dy: +65.0 source px/frame
+- Median displacement magnitude: 65.12 source px/frame
+
+### Class appearances
+
+| Class | Frames |
+|---|---:|
+| condor | 11 |
+| hangar | 6 |
+| helicopter | 19 |
+| jammer | 13 |
+| jet_plane | 22 |
+| large_launcher | 25 |
+| large_tower | 19 |
+| medium_launcher | 10 |
+| medium_plane | 5 |
+| mine_roller | 2 |
+| small_launcher | 25 |
+| small_plane | 9 |
+| small_tower | 20 |
+| spacecraft | 23 |
+| ta-ta | 25 |
+| tank | 25 |
+
+### Representative median object sizes
+
+| Class | Source | L0 | L1 | L2 |
+|---|---|---|---|---|
+| condor | 173x166 | 43x42 | 87x83 | 173x166 |
+| helicopter | 116x94 | 29x24 | 58x47 | 116x94 |
+| jammer | 33x43 | 8x11 | 17x22 | 33x43 |
+| jet_plane | 77x81 | 19x20 | 39x41 | 77x81 |
+| medium_launcher | 47x46 | 12x11 | 24x23 | 47x46 |
+| small_launcher | 22x30 | 6x8 | 11x15 | 22x30 |
+| spacecraft | 44x49 | 11x12 | 22x25 | 44x49 |
+| ta-ta | 32x17 | 8x4 | 16x9 | 32x17 |
+| tank | 50x47 | 13x12 | 25x24 | 50x47 |
+
+**Interpretation:**  
+The dataset is highly temporal rather than consisting of independent examples. Once an object is identified, its next-frame position should often be substantially easier to predict than rediscovering it from scratch.
+
+Level 0 severely undersamples multiple important classes. Small launcher, ta-ta, jammer, spacecraft, tank and several aircraft become approximately single-digit to low-teens pixel structures. Active zoom therefore has real information value rather than merely enlarging already sufficient imagery.
+
+The strong global +Y motion suggests that a simple constant-velocity tracker, potentially supplemented by global image motion estimation, deserves early testing.
+
+**Decision:** KEEP
+
+Prioritize:
+1. class/exemplar recognition,
+2. temporal memory/tracking,
+3. zoom-aware camera policy,
+over expensive frame-independent detector tuning.
+
+---

@@ -1516,3 +1516,210 @@ Further broad model changes are not justified before observing the real validati
 **Decision:** KEEP
 
 Use this configuration for the first real validation-sequence capture attempt.
+
+---
+
+# EXP-D021 — First real validation capture and domain reconnaissance
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+**Validation attempt UUID:**  
+`89eafdd018304b53b58c9f305f78a589`
+
+**Validation sequence ID:**  
+`9204f05e8ffe46f995edd8c093823393`
+
+**Configuration:** EXP-D020
+
+- YOLO11n tiled objectness detector
+- YOLO confidence: 0.025
+- 2x2 matched tiling
+- MobileNetV3-Small classifier
+- classifier input: 224x224
+- fixed classifier batch size: 16
+- Apple MPS
+- camera held at Level 0 full-frame
+- validation capture enabled
+
+## Hypothesis
+
+The Helsinki-trained realtime detector/classifier pipeline would retain meaningful accuracy on the real validation sequence, while the capture infrastructure would provide representative validation-domain imagery for further analysis.
+
+## Competition validation result
+
+- Validation sequence length: 249 frames
+- Validation score: **0.0010424119335010423**
+- Evaluator errors: none
+- Attempt completed successfully
+
+Timing:
+
+- submitted: 2026-09-17 18:45:17 UTC
+- started: 2026-09-17 18:45:18 UTC
+- finished: 2026-09-17 18:46:42 UTC
+
+## Capture coverage
+
+Captured validation requests:
+
+- PNG frames: **146**
+- metadata JSON files: **146**
+- total sequence frames: 249
+- received coverage: **58.6%**
+- missing frames: **103**
+- missing fraction: **41.4%**
+
+Frame-index range:
+
+- first received `frame_index`: 0
+- last received `frame_index`: 248
+- first source frame: 1
+- last source frame: 249
+
+All captured requests used:
+
+- resolution level: **0**
+- source region: **[0, 0, 3840, 2160]**
+
+Therefore the poor score is not caused by an incorrect camera region or Level-1/Level-2 coordinate conversion.
+
+## Frame-loss pattern
+
+The missing-frame pattern was strongly regular.
+
+After an initial gap from frame index 0 to 4, most of the validation sequence alternated approximately between:
+
+- one frame received
+- one frame skipped
+- one frame received
+- one frame skipped
+
+Most individual gaps were exactly one skipped frame, with only a few two-frame gaps.
+
+This indicates a realtime/deployment problem in addition to the visual-model failure.
+
+The request path was not consistently keeping up with the 333 ms frame interval during the real validation run.
+
+## Validation-domain imagery
+
+A contact sheet was generated from 30 evenly spaced samples across the 146 retained Level-0 validation frames.
+
+The real validation scene differs substantially from the supplied Helsinki scene.
+
+Observed validation environments include:
+
+- highways and road infrastructure
+- forest and open terrain
+- industrial areas
+- harbor / marina regions
+- dense urban areas
+- residential blocks
+- rail and transport infrastructure
+
+The visual/background distribution is therefore substantially broader and different from the Helsinki training reference.
+
+## Validation-domain detector proposal analysis
+
+The EXP-D010 tiled YOLO detector was evaluated offline on all 146 captured validation frames using:
+
+- YOLO confidence: 0.025
+- same 2x2 tiled inference
+- same NMS configuration
+- Apple MPS
+
+Results:
+
+- Mean proposals/frame: **4.5**
+- Median proposals/frame: **3.0**
+- P95 proposals/frame: **13.0**
+- Maximum proposals/frame: **18**
+
+Proposal-count thresholds:
+
+- Frames >16 proposals: **2 / 146**
+- Frames >32 proposals: **0 / 146**
+- Frames >48 proposals: **0 / 146**
+
+YOLO latency:
+
+- Median: **73.5 ms**
+- P95: **89.2 ms**
+
+## Interpretation
+
+The validation failure has two separate components.
+
+### 1. Severe visual-domain / instance overfitting
+
+The detector does not suffer from proposal explosion on the validation sequence.
+
+Instead, it produces very few proposals:
+
+- median only 3 detections/frame
+- mean only 4.5 detections/frame
+
+This shows that the Helsinki-trained objectness detector largely fails to activate on the real validation domain.
+
+The extremely high Helsinki result:
+
+- realtime Helsinki mAP@0.50: **0.892**
+
+therefore did not represent class-level generalization.
+
+The supplied Helsinki sequence contains repeated observations of the same small set of physical objects, so both the detector and classifier learned Helsinki-specific appearance and identity cues.
+
+The MobileNet validation-crop accuracy and Helsinki temporal holdouts were therefore overly optimistic measures of real-world generalization.
+
+### 2. Realtime / deployment frame loss
+
+Only 146 of 249 validation frames reached the endpoint.
+
+The approximately alternating receive/skip pattern indicates that the real request path also failed to maintain the 3 FPS cadence consistently.
+
+However, frame loss alone cannot explain a validation score of approximately 0.001.
+
+Even with 41.4% of frames missing, a detector that generalized meaningfully on the remaining frames would be expected to score substantially higher.
+
+Therefore the dominant problem is visual generalization, with deployment latency as a secondary problem that must also be fixed.
+
+## Key conclusion
+
+Further optimization against the 25 Helsinki frames is no longer justified.
+
+The competition strategy must pivot from:
+
+`Helsinki-specific supervised detector training`
+
+to:
+
+`validation-domain data acquisition + generalizable recognition/localization`
+
+The retained validation sequence is now more valuable than additional Helsinki tuning.
+
+Level 0 has already discarded substantial small-object detail, so the next repeatable validation attempt should prioritize high-resolution validation-domain data collection using Level 1 and/or Level 2 camera views.
+
+## Decision
+
+**MAJOR PIVOT — KEEP the validation capture infrastructure, DISCARD Helsinki score as a meaningful generalization benchmark.**
+
+Do not:
+
+- spend more time tuning Helsinki-only YOLO
+- build a sophisticated tracker
+- optimize MobileNet further
+- interpret Helsinki mAP as expected competition performance
+- run Evaluation
+
+Next priority:
+
+**EXP-D022 — capture-only high-resolution validation scan using Level 1 camera views.**
+
+Objectives:
+
+1. remove model inference from the request path
+2. determine whether the remaining frame loss is caused by ngrok/networking
+3. capture real validation-domain imagery at substantially higher spatial resolution
+4. use retained validation imagery for domain-specific discovery, pseudo-labeling, template/feature matching, and model adaptation
+5. only then run another scoring validation

@@ -1270,3 +1270,92 @@ Tracking may still be useful later for identity stabilization or reducing how of
 **Decision:** DISCARD as a score-priority direction.
 
 Do not implement a sophisticated tracker now.
+
+---
+
+# EXP-D018 — Validation-sequence capture infrastructure
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+The officially permitted validation sequence can provide a much larger unlabeled dataset from the real challenge distribution. Capturing the complete L0 view on every received frame maximizes retained visual information for domain analysis, pseudo-labeling and camera-policy development.
+
+**Change:**  
+Added competition-safe request capture infrastructure.
+
+For every `/predict` request retain:
+- sequence_id
+- source frame
+- frame_index
+- request_id
+- timing budgets
+- complete transmitted PNG
+- resolution level
+- camera center
+- view ID
+- source_region_xyxy
+- camera constraints
+- camera rejection feedback
+
+Capture failures are isolated from prediction with exception handling.
+
+Initial camera policy holds/resets to:
+- level 0
+- center (1920, 1080)
+
+This captures the complete source frame at 960x540 every received timestep.
+
+**Validation:**  
+First validate locally on the 25-frame Helsinki evaluator before using a competition validation attempt.
+
+Success criteria:
+- 25/25 responses accepted
+- 0 invalid responses
+- 0 timeouts
+- 25 PNGs captured
+- 25 metadata JSON files captured
+- no frame_index gaps
+
+**Hardware:**  
+MacBook Air M1
+
+## Results
+
+Local realtime Helsinki validation:
+
+- Frames in scene: 25
+- Frames sent: 25
+- Frames skipped: 0
+- Frames unanswered: 0
+- Responses accepted: 25
+- Timeouts: 0
+- HTTP errors: 0
+- Invalid responses: 0
+- Camera moves applied: 0
+- Camera moves refused: 0
+- Round-trip latency:
+  - mean: 11 ms
+  - median: 10 ms
+  - max: 20 ms
+
+Capture inventory:
+- PNG frames: 25
+- Per-frame metadata JSONs: 25
+- frame_index sequence: continuous 0–24
+
+Captured L0 geometry:
+- transmitted view: 960x540
+- resolution level: 0
+- camera center: (1920, 1080)
+- source_region_xyxy: [0, 0, 3840, 2160]
+
+**Interpretation:**  
+Capture infrastructure is competition-safe under the local realtime evaluator. It introduces negligible overhead, preserves every received frame and its camera metadata, and does not create invalid responses or frame skips.
+
+Holding Level 0 retains the complete source frame on every timestep and is therefore appropriate for the first real validation-sequence capture.
+
+**Decision:** KEEP
+
+Integrate the current realtime CV pipeline while retaining capture.

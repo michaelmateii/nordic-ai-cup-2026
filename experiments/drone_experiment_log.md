@@ -676,11 +676,109 @@ Metrics:
 **Hardware:**  
 MacBook Air M1 / Apple MPS
 
-**Results:**  
-TBD
+## Results
+
+| Configuration | Tiles/frame | Proposals/frame | Median latency | Holdout recall @0.30 | Holdout recall @0.50 |
+|---|---:|---:|---:|---:|---:|
+| Full frame | 1 | 79.2 | 18.6 ms | 0.4815 | 0.4815 |
+| 2x2, 20% overlap | 4 | 148.9 | 75.4 ms | 0.2963 | 0.2222 |
+| 3x2, 20% overlap | 6 | 155.8 | 154.8 ms | 0.1111 | 0.0370 |
+
+### Holdout per-class IoU@0.50 recall
+
+| Class | Full | 2x2 | 3x2 |
+|---|---:|---:|---:|
+| hangar | 0.000 | 0.000 | 0.000 |
+| jet_plane | 1.000 | 1.000 | 0.333 |
+| large_launcher | 1.000 | 1.000 | 0.000 |
+| large_tower | 0.333 | 0.000 | 0.000 |
+| medium_launcher | 0.000 | 0.000 | 0.000 |
+| medium_plane | 1.000 | 0.000 | 0.000 |
+| small_launcher | 0.000 | 0.000 | 0.000 |
+| spacecraft | 0.000 | 0.000 | 0.000 |
+| ta-ta | 0.000 | 0.000 | 0.000 |
+| tank | 1.000 | 0.000 | 0.000 |
 
 **Interpretation:**  
-TBD
+Applying spatial tiling only at inference introduces a severe scale/context distribution shift relative to the full-frame training distribution. The existing full-frame detector performs substantially better than either tiled configuration.
 
-**Decision:**  
-TBD
+This does not establish that tiled localization is inherently ineffective; it establishes that inference-only tiling with a full-frame-trained model is ineffective.
+
+**Decision:** DISCARD
+
+Do not use inference-only tiling with the EXP-D007 model. Run one matched train-on-tiles / infer-on-tiles screen before abandoning the scale hypothesis.
+
+---
+
+---
+
+# EXP-D010 — Matched 2x2 tile training
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+EXP-D009 failed because tiled inference created a scale/context distribution shift relative to full-frame training. Training and inference on the same 2x2 overlapping tile distribution may improve tiny-object localization.
+
+**Change:**  
+Build 2x2 Level 0 tiles with 20% overlap from the same temporal split used in EXP-D007.
+
+Train YOLO11n objectness directly on those tiles.
+
+Objects are assigned to tiles containing the object center to avoid duplicate partial labels.
+
+Training:
+- YOLO11n pretrained
+- imgsz 960
+- one class: `target`
+- no mosaic
+- same temporal train/gap/validation split
+
+**Validation:**  
+Matched tiled validation from frames 22–24.
+
+After training, the model will be evaluated after mapping tiled detections back into full-frame Level 0 coordinates.
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+Matched 2x2 tile training completed successfully.
+
+Validation:
+- Images: 12 tiles
+- Instances: 27
+- Precision: 0.817
+- Recall: 0.667
+- mAP@0.50: 0.682
+- mAP@0.50:0.95: 0.450
+
+Ultralytics validation speed:
+- Preprocess: 0.4 ms/tile
+- Inference: 51.7 ms/tile
+- Postprocess: 2.0 ms/tile
+
+Best checkpoint:
+
+`drone/artifacts/exp_d010/runs/yolo11n_tiled_objectness/weights/best.pt`
+
+**Interpretation:**  
+Matched tile training substantially outperforms both full-frame objectness training and inference-only tiling.
+
+EXP-D007 full-frame validation:
+- recall: 0.407
+- mAP@0.50: 0.435
+
+EXP-D010 matched-tile validation:
+- recall: 0.667
+- mAP@0.50: 0.682
+
+This confirms that effective target scale is a major localization bottleneck. The failure of EXP-D009 was caused by train/inference scale mismatch rather than tiling itself.
+
+The next step is to map tiled detections back into full Level 0 coordinates and measure original-object proposal recall, proposal count, and end-to-end frame latency.
+
+**Decision:** KEEP
+
+---

@@ -782,3 +782,80 @@ The next step is to map tiled detections back into full Level 0 coordinates and 
 **Decision:** KEEP
 
 ---
+
+---
+
+# EXP-D011 — Full-frame mapped evaluation of tiled detector
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+The matched-tile model from EXP-D010 should substantially improve original-object proposal recall once tile predictions are mapped back into full Level 0 coordinates.
+
+**Change:**  
+Run the EXP-D010 model over all four 2x2 overlapping tiles, map detections back into 960x540 Level 0 coordinates, merge duplicate boxes with NMS, and sweep confidence.
+
+**Validation:**  
+Primary: frames 22–24 temporal holdout.  
+Secondary: all Helsinki frames.
+
+Metrics:
+- original-object proposal recall @ IoU 0.30
+- original-object proposal recall @ IoU 0.50
+- per-class recall
+- proposals/frame after tile merging
+- total four-tile frame latency
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+| Confidence | Proposals/frame | Median latency | p95 latency | Holdout recall @0.30 | Holdout recall @0.50 |
+|---:|---:|---:|---:|---:|---:|
+| 0.005 | 26.1 | 78.8 ms | 82.6 ms | 0.8148 | 0.8148 |
+| 0.010 | 16.2 | 76.8 ms | 78.8 ms | 0.7407 | 0.7407 |
+| 0.025 | 12.0 | 78.7 ms | 79.5 ms | 0.7037 | 0.7037 |
+| 0.050 | 10.9 | 77.8 ms | 88.4 ms | 0.7037 | 0.7037 |
+| 0.100 | 10.2 | 75.9 ms | 82.6 ms | 0.6667 | 0.6667 |
+| 0.250 | 9.8 | 75.6 ms | 78.3 ms | 0.6667 | 0.6667 |
+
+### Best operating point
+
+`conf=0.005`
+
+- Holdout proposal recall @ IoU 0.50: 0.8148
+- Mean proposals/frame: 26.1
+- Median total four-tile latency: 78.8 ms
+
+### Per-class holdout proposal recall
+
+| Class | R@0.30 | R@0.50 |
+|---|---:|---:|
+| hangar | 0.667 | 0.667 |
+| jet_plane | 1.000 | 1.000 |
+| large_launcher | 1.000 | 1.000 |
+| large_tower | 1.000 | 1.000 |
+| medium_launcher | 0.500 | 0.500 |
+| medium_plane | 0.333 | 0.333 |
+| small_launcher | 1.000 | 1.000 |
+| spacecraft | 0.000 | 0.000 |
+| ta-ta | 1.000 | 1.000 |
+| tank | 1.000 | 1.000 |
+
+**Interpretation:**  
+Matched tiled training solves much of the tiny-object localization problem. Original-object holdout recall increases to 81.5% at IoU 0.50 while retaining sub-100 ms detector latency on the M1.
+
+Compared with EXP-D008, tiny classes such as `small_launcher` and `ta-ta` improve from zero recall to perfect recall on the temporal holdout.
+
+Remaining localization weaknesses are concentrated in `spacecraft`, `medium_plane`, `medium_launcher`, and to a lesser extent `hangar`.
+
+At this point further detector architecture tuning has lower expected value than integrating the already-strong DINOv2 class recognizer.
+
+**Decision:** KEEP
+
+Use `conf=0.005` as the high-recall proposal operating point for the first complete detection + classification pipeline.
+
+---

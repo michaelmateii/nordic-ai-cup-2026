@@ -1095,13 +1095,104 @@ Metrics:
 **Hardware:**  
 MacBook Air M1
 
-**Results:**  
-TBD
+## Results
+
+| Device / input | Macro mAP@0.50 | Classifier median | Estimated total median |
+|---|---:|---:|---:|
+| MPS 224 | 0.7141 | 164.6 ms | 249.8 ms |
+| MPS 160 | 0.6010 | 163.3 ms | 248.5 ms |
+| MPS 128 | 0.5396 | 160.1 ms | 245.2 ms |
+| CPU 224 | 0.7141 | 1069.6 ms | 1154.8 ms |
+| CPU 160 | 0.6010 | 601.5 ms | 686.7 ms |
+| CPU 128 | 0.5396 | 461.1 ms | 546.3 ms |
 
 **Interpretation:**  
-TBD
+Apple MPS is decisively faster than CPU for MobileNetV3 on this workload.
 
-**Decision:**  
-TBD
+Reducing classifier input resolution from 224 to 160 or 128 provides almost no useful MPS latency reduction while causing substantial AP loss. Therefore 224x224 should remain the recognition input size.
 
+The estimated detector + classifier median at MPS/224 is approximately 250 ms, but EXP-D014 measured ~321 ms end-to-end because preprocessing, crop conversion, tensor construction and other Python overhead are not included in this estimate.
 
+**Decision:** KEEP
+
+Use MobileNetV3-Small on MPS at 224x224. Optimize proposal count and complete end-to-end runtime rather than reducing classifier resolution.
+
+---
+
+# EXP-D016 — End-to-end realtime operating point
+
+**Status:** RUNNING
+
+**Date:** 2026-09-17
+
+**Hypothesis:**  
+A slightly higher YOLO confidence threshold will reduce MobileNet batch size enough to improve complete pipeline latency while retaining most of the static AP.
+
+**Change:**  
+Evaluate the full matched-tile YOLO + MobileNetV3 pipeline at:
+
+- YOLO conf 0.005
+- YOLO conf 0.010
+- YOLO conf 0.025
+
+MobileNet remains:
+- MPS
+- 224x224
+
+Each configuration is warmed before its measured run.
+
+**Validation:**  
+Temporal holdout frames 22–24.
+
+Metrics:
+- macro mAP@0.50
+- mean proposals/frame
+- YOLO median latency
+- MobileNet median latency
+- total median latency
+- total maximum latency
+
+**Hardware:**  
+MacBook Air M1 / Apple MPS
+
+## Results
+
+| YOLO conf | Macro mAP@0.50 | Mean proposals/frame | YOLO median | MobileNet median | Total median | Total max |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0.005 | 0.7141 | 23.0 | 87.0 ms | 211.7 ms | 319.9 ms | 376.8 ms |
+| 0.010 | 0.6842 | 11.3 | 83.6 ms | 202.2 ms | 295.1 ms | 306.4 ms |
+| 0.025 | 0.6505 | 7.7 | 82.9 ms | 161.2 ms | 250.5 ms | 262.8 ms |
+
+### Per-class AP at conf=0.010
+
+| Class | AP@0.50 |
+|---|---:|
+| hangar | 0.3366 |
+| jet_plane | 1.0000 |
+| large_launcher | 1.0000 |
+| large_tower | 1.0000 |
+| medium_launcher | 0.5050 |
+| medium_plane | 0.0000 |
+| small_launcher | 1.0000 |
+| spacecraft | 0.0000 |
+| ta-ta | 1.0000 |
+| tank | 1.0000 |
+
+**Interpretation:**  
+`conf=0.005` provides the highest static score but produces unsafe realtime latency, exceeding the approximately 333 ms frame interval in the measured run.
+
+`conf=0.025` provides substantial latency headroom but sacrifices approximately 0.034 mAP relative to `conf=0.010` and approximately 0.064 relative to `conf=0.005`.
+
+`conf=0.010` is currently the best realtime operating point:
+- macro mAP@0.50: 0.6842
+- median complete latency: 295.1 ms
+- measured maximum latency: 306.4 ms
+- approximately 11 proposals/frame
+
+This preserves most of the scoring performance while remaining below the 333 ms frame cadence in the measured holdout run.
+
+**Decision:** KEEP
+
+Use `YOLO_CONF=0.010` as the default realtime static pipeline operating point.
+
+Retain `0.005` as an offline/high-recall option and possible occasional discovery mode if temporal scheduling later creates compute headroom.

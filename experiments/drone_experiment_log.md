@@ -2636,3 +2636,219 @@ Next:
 2. perform a second targeted manual pass focused only on the nine missing classes
 3. propagate any new high-confidence seeds locally
 4. then train the first validation-domain detector
+
+---
+
+# EXP-D028A — Targeted missing-class validation seed pass
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+A second targeted manual inspection pass can improve macro-class coverage by focusing exclusively on classes that still lack validation-domain supervision.
+
+## Change
+
+Expanded the validation seed inspection set from 30 to 80 sampled L1 frames.
+
+The annotator was restricted to previously missing classes to reduce distraction from already-covered targets.
+
+## Results
+
+The pass added validation-domain annotations for four previously uncovered classes:
+
+- hangar: 2
+- jet_plane: 4
+- small_plane: 9
+- small_tower: 6
+
+Total canonical annotation file now contains:
+
+- **44 manual annotations**
+- **27 labeled frames**
+
+Real-validation class coverage increased from:
+
+- **7 / 16 classes**
+
+to:
+
+- **11 / 16 classes**
+
+Classes still without manual validation seeds:
+
+- condor
+- jammer
+- small_launcher
+- spacecraft
+- ta-ta
+
+## Interpretation
+
+Targeted manual inspection is materially improving macro-class coverage.
+
+The newly added classes have enough seeds for direct within-validation propagation testing:
+
+- hangar: 2
+- jet_plane: 4
+- small_plane: 9
+- small_tower: 6
+
+These classes should be benchmarked before pseudo-label generation rather than assumed propagatable.
+
+## Decision
+
+**KEEP**
+
+Proceed to EXP-D028B:
+
+Re-run the leave-one-seed-out local propagation benchmark using the expanded real-validation annotation set and evaluate the four newly seeded classes individually.
+
+---
+
+# EXP-D028B — Expanded-class short-range propagation benchmark
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-17
+
+## Hypothesis
+
+The four newly annotated validation classes may support the same short-range within-domain propagation strategy that previously worked for tank and large_tower.
+
+## Data
+
+Manual validation seeds: **44**
+
+Newly evaluated classes:
+
+- hangar: 2 seeds
+- jet_plane: 4 seeds
+- small_plane: 9 seeds
+- small_tower: 6 seeds
+
+## Aggregate result
+
+Across all classes:
+
+- gap <= 15:
+  - pairs: 116
+  - R@IoU0.50: 0.388
+  - median IoU: 0.015
+  - median NCC: 0.986
+
+The aggregate metric is heavily confounded by comparisons between different physical instances of the same semantic class, especially small_plane.
+
+## Per-class short-range results
+
+### hangar
+
+At gap <= 10:
+
+- pairs: 2
+- R@IoU0.50: **0.000**
+- median IoU: 0.389
+- median NCC: 0.851
+
+Even the strongest high-NCC match remains below IoU 0.50.
+
+**Decision:** do not automatically propagate.
+
+### jet_plane
+
+At gap <= 10:
+
+- pairs: 12
+- R@IoU0.50: **0.500**
+- median NCC: 0.977
+
+At NCC >= 0.90:
+
+- pairs: 11
+- P@IoU0.50: **0.545**
+- median IoU: **0.715**
+
+Very high NCC does not guarantee correctness; NCC >= 0.98 actually reduces precision to 0.400.
+
+**Decision:** propagate only as AUDIT-ONLY candidates with cycle consistency and human verification.
+
+### small_plane
+
+At gap <= 10:
+
+- pairs: 72
+- R@IoU0.50: **0.194**
+- median IoU: **0.000**
+- median NCC: **0.989**
+
+NCC >= 0.90–0.98 does not materially improve precision.
+
+This is strong evidence that similar-looking same-class instances cause template confusion.
+
+**Decision:** do not trust automatic propagation.
+
+### small_tower
+
+At gap <= 5:
+
+- pairs: 4
+- R@IoU0.50: **1.000**
+- median IoU: 0.682
+
+At gap <= 10:
+
+- pairs: 12
+- R@IoU0.50: **1.000**
+- median IoU: 0.686
+
+At gap <= 10 and NCC >= 0.90:
+
+- pairs: 10
+- P@IoU0.50: **1.000**
+- median IoU: **0.706**
+
+At gap <= 15 and NCC >= 0.94:
+
+- pairs: 8
+- P@IoU0.50: **1.000**
+- median IoU: 0.706
+
+**Decision:** promote small_tower to TRUSTED propagation class.
+
+## Interpretation
+
+Propagation reliability is strongly class-dependent.
+
+A single global NCC threshold is inappropriate.
+
+Current trusted propagation classes:
+
+- tank
+- large_tower
+- small_tower
+
+Audit-only propagation:
+
+- jet_plane
+- helicopter
+- large_launcher
+- medium_launcher
+- medium_plane
+- mine_roller
+
+Manual-only / no automatic propagation:
+
+- hangar
+- small_plane
+
+## Decision
+
+**KEEP class-specific propagation policy.**
+
+Proceed to EXP-D028C:
+- add small_tower to trusted propagation
+- generate cycle-consistent candidates from the expanded 44-seed set
+- retain all other propagated classes as human-audit-only
+- do not automatically trust jet_plane despite high NCC

@@ -377,3 +377,38 @@
 **Decision:** DISCARD this broad strategy. Retain population context for a narrower emergency-only experiment.
 
 ---
+
+## EXP-S013 — Selective breeding
+
+**Challenge:** Survival Simulator
+
+**Hypothesis:** Favoring reproduction from agents with strong inherited traits such as max energy, hearing radius, and vision range could improve long-term survivability over multiple generations.
+
+**Change made:**
+- retained S007 navigation and predator behavior
+- computed a fitness score from:
+  - max energy
+  - hearing radius
+  - vision range
+  - walking speed
+- strong candidates reproduced earlier
+- weak candidates reproduced more conservatively
+
+**Validation:** 5-seed development screen:
+101, 202, 303, 404, 606
+
+**Results:**
+- Mean score: 781.2639
+- Median score: 774.4965
+- Min score: 469.8358
+- Max score: 1077.4487
+- Mean survival: 748.26 s
+- Median survival: 766.40 s
+- Min survival: 428.90 s
+- Max survival: 1015.90 s
+
+**Interpretation:** Selective reproduction substantially reduced performance on four of five seeds. Trait-based reproduction pressure appears to disrupt the successful S007 lineage dynamics more than it helps evolutionary quality.
+
+**Decision:** DISCARD. Do not run full benchmark.
+
+---

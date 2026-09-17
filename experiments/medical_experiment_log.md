@@ -2182,3 +2182,362 @@ KEEP.
 Current best development pipeline.
 
 Next priority: create a deployable full-data version of the supervised evidence ranker and run the official 19-conversation validation before further local optimization.
+
+---
+
+## EXP-M027 — Full-Data Deployment Evidence Ranker
+
+### Goal
+
+Convert the conversation-disjoint evidence-localization experiment from EXP-M025 into a single deployment model that can be used on the official hidden validation and evaluation conversations.
+
+### Background
+
+EXP-M025 evaluated a supervised sentence-span ranker with five-fold GroupKFold validation grouped by `transcript_id`.
+
+Its out-of-fold localization result was:
+
+* mean tIoU: 0.4771
+* median tIoU: 0.4766
+* any overlap: 0.7231
+* tIoU >= 0.25: 0.6872
+* tIoU >= 0.50: 0.4769
+* tIoU >= 0.75: 0.3333
+
+Sentence-candidate oracle:
+
+* mean tIoU: 0.7997
+* median tIoU: 0.8974
+
+### Change made
+
+After preserving the EXP-M025 out-of-fold evaluation, trained a final `HistGradientBoostingRegressor` on the complete set of supplied positive training questions.
+
+Training set:
+
+* 195 positive questions
+* all associated 1–3 sentence evidence candidates
+
+Features:
+
+* `sentence_count`
+* `word_count`
+* `duration`
+* `lexical_score`
+* `semantic_score`
+* `anchor_iou`
+* `anchor_mid_distance`
+* `anchor_start_distance`
+* `anchor_end_distance`
+* `contains_anchor_mid`
+
+Model configuration:
+
+* learning rate: 0.06
+* max iterations: 250
+* max leaf nodes: 15
+* min samples leaf: 30
+* L2 regularization: 1.0
+* random state: 42
+
+Each training question contributes equal total sample weight regardless of its number of candidate spans.
+
+### Deployment artifact
+
+Saved locally as:
+
+`medical/artifacts/models/sentence_ranker.joblib`
+
+Artifact verification:
+
+* bundle loads successfully with `joblib`
+* `max_sentences`: 3
+* `training_questions`: 195
+* expected 10-feature schema present
+
+The deployment artifact is intentionally excluded from Git under `medical/artifacts/`.
+
+### Validation of training change
+
+Rerunning the script after adding full-data model training preserved the original EXP-M025 out-of-fold score:
+
+* mean tIoU: 0.4771
+* median tIoU: 0.4766
+* candidate oracle mean: 0.7997
+
+Therefore the deployment-training addition did not alter the measured OOF experiment.
+
+### Interpretation
+
+EXP-M027 does not claim a new development-score improvement.
+
+Its purpose is operational: produce one ranker trained on all available labeled training data for use against previously unseen official validation/evaluation conversations.
+
+The unbiased development reference remains EXP-M025's conversation-disjoint OOF result.
+
+### Decision
+
+KEEP.
+
+Deployment evidence ranker is ready for integration into the competition runtime.
+
+---
+
+## EXP-M028B — End-to-End HTTP Smoke Test
+
+### Goal
+
+Verify the frozen Medical pipeline through the actual FastAPI `/predict` interface before using an official validation attempt.
+
+### Test case
+
+Training consultation:
+
+`conversation_sample_10.mp3`
+
+Questions:
+
+10
+
+Full runtime path:
+
+audio Base64
+→ faster-whisper ASR
+→ lexical + MS MARCO retrieval
+→ segmentwise DeBERTa NLI
+→ supervised M025 sentence evidence ranker
+→ competition JSON response
+
+### Operational results
+
+* HTTP status: 200
+* request latency: 6.71 seconds
+* response structure: PASS
+* answer count: 10
+* evidence_start count: 10
+* evidence_end count: 10
+* FALSE answers correctly returned null evidence
+* TRUE answers returned finite ordered evidence intervals
+
+### Prediction result
+
+* accuracy: 9/10 = 0.900
+* predicted YES: 4/10
+
+Single classification error:
+
+`Were abnormal sounds heard over the lungs?`
+
+* gold: FALSE
+* predicted: TRUE
+* returned evidence: 53.54–55.88 s
+
+The following positive question correctly selected the same evidence region:
+
+`Were the lungs and heart normal on auscultation?`
+
+* gold: TRUE
+* predicted: TRUE
+* returned evidence: 53.54–55.88 s
+
+### Interpretation
+
+The HTTP/runtime infrastructure is functioning correctly and comfortably within the 60-second request timeout.
+
+The remaining error exposes a previously identified claim-conversion weakness for passive `was/were` questions rather than an evidence-retrieval failure.
+
+### Decision
+
+KEEP runtime/infrastructure.
+
+Do not use an official validation attempt until passive claim construction is tested and either accepted or rejected using conversation-disjoint OOF evaluation.
+
+---
+
+## EXP-M028C — Passive `is/are/was/were` Claim Conversion
+
+### Motivation
+
+The end-to-end smoke test exposed a known declarative-conversion failure:
+
+`Were abnormal sounds heard over the lungs?`
+
+The existing converter could produce a malformed hypothesis similar to:
+
+`Abnormal were sounds heard over the lungs.`
+
+A targeted passive/copular conversion rule was tested.
+
+### Change
+
+Added predicate-start detection for passive/copular questions such as:
+
+* `Were abnormal sounds heard over the lungs?`
+* `Were bacteria identified in the sample?`
+* `Was the patient prescribed amoxicillin?`
+* `Is the stomach acid medication being discontinued?`
+
+The intention was to generate grammatical hypotheses such as:
+
+`Abnormal sounds were heard over the lungs.`
+
+### Validation
+
+Five-fold conversation-disjoint GroupKFold calibration was rerun on all 390 questions.
+
+Best classification method remained:
+
+`max_segment_margin`
+
+### Results
+
+EXP-M028C:
+
+* OOF accuracy: 0.8795
+* predicted YES rate: 0.4872
+* positive accuracy: 0.8667 (169/195)
+* hard_negative accuracy: 0.8662 (123/142)
+* off_topic accuracy: 0.9623 (51/53)
+* confusion matrix: `[[174, 21], [26, 169]]`
+
+Previous EXP-M018 reference:
+
+* OOF accuracy: 0.8821
+* positive accuracy: 0.8718 (170/195)
+* hard_negative accuracy: 0.8662
+* off_topic accuracy: 0.9623
+
+Difference:
+
+* overall accuracy: -0.0026
+* one additional false-negative positive question
+* no improvement in hard-negative or off-topic performance
+
+### Interpretation
+
+The targeted linguistic correction improves grammaticality but does not improve conversation-disjoint classification performance.
+
+The visible smoke-test error should not be patched at the cost of measured generalization.
+
+### Decision
+
+DISCARD.
+
+Revert the passive conversion change and retain the EXP-M018 claim converter and operating point for official validation.
+
+---
+
+## EXP-M028D — Full 39-Conversation Local End-to-End Evaluation
+
+### Goal
+
+Validate the exact frozen deployment runtime against all supplied Medical Appointment conversations through the official `local_evaluator.py`.
+
+This test exercises:
+
+audio Base64 request
+→ FastAPI `/predict`
+→ faster-whisper ASR
+→ lexical + MS MARCO retrieval
+→ segmentwise DeBERTa NLI classification
+→ supervised sentence evidence localization
+→ response validation
+→ official scoring
+
+### Runtime
+
+Machine:
+
+Windows PC — NVIDIA GeForce GTX 1060 6 GB
+
+Endpoint:
+
+`http://127.0.0.1:8000/predict`
+
+ASR:
+
+* faster-whisper
+* `distil-large-v3`
+* CUDA
+* `int8_float32`
+* beam size 1
+* word timestamps enabled
+
+Classification:
+
+* `cross-encoder/nli-deberta-v3-small`
+* declarative claim transformation
+* maximum segment-level entailment-minus-contradiction margin
+* frozen threshold: 0.000585
+
+Evidence:
+
+* 1–3 punctuation-delimited sentence candidates
+* full-data EXP-M027 HistGradientBoosting sentence ranker
+
+### Attempt statistics
+
+* questions: 390
+* correct: 340
+* unanswered: 0
+* conversations: 39
+* failed conversations: 0
+* timeouts: 0
+
+### Accuracy by question type
+
+* positive: 0.851 (166/195)
+* hard_negative: 0.866 (123/142)
+* off_topic: 0.962 (51/53)
+
+### Evidence localization
+
+* mean scored tIoU: 0.419
+* no span returned for gold positives: 29
+* tIoU among answered-YES gold positives: 0.492
+* diagnostic answered-YES positive count: 166
+
+### Runtime
+
+* mean round trip per conversation: 6510 ms
+* worst round trip: 11537 ms
+* mean per question: 651 ms
+* worst request used approximately 19% of the 60-second budget
+
+### Final score
+
+* Accuracy: 0.872
+* Mean tIoU: 0.419
+* Composite score: 0.600
+
+### Comparison
+
+EXP-M026 OOF-derived development reference:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4183
+* Composite: 0.6038
+
+Exact deployed local runtime:
+
+* Accuracy: 0.872
+* Mean scored tIoU: 0.419
+* Composite: 0.600
+
+### Interpretation
+
+The exact deployed runtime closely matches the conversation-disjoint development estimate.
+
+There were no failed conversations, malformed responses, or timeouts.
+
+Evidence localization reproduces the development estimate almost exactly.
+
+Classification is approximately one percentage point lower than the OOF reference but remains close enough that additional tuning on the supplied 39 conversations would carry greater overfitting risk than likely benefit.
+
+Worst-case latency of 11.54 seconds is comfortably below the 60-second per-request timeout.
+
+### Decision
+
+KEEP and FREEZE for first official validation.
+
+Do not make further model-selection changes before obtaining an external validation score.

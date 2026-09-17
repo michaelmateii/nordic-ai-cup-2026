@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import joblib
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,10 @@ M010 = Path(
 
 OUTPUT = Path(
     r"medical\artifacts\retrieval\supervised_sentence_ranker_results.csv"
+)
+
+FINAL_MODEL_OUTPUT = Path(
+    r"medical\artifacts\models\sentence_ranker.joblib"
 )
 
 MODEL_ID = "cross-encoder/ms-marco-MiniLM-L6-v2"
@@ -720,6 +725,68 @@ def main() -> None:
     elapsed = (
         time.perf_counter()
         - feature_start
+    )
+    
+        # ---------------------------------------------------------
+    # Train deployment model on ALL supplied positive questions.
+    #
+    # OOF metrics above remain the development estimate.
+    # This full-data model is ONLY for hidden validation/evaluation.
+    # ---------------------------------------------------------
+
+    full_candidate_counts = (
+        candidate_df.groupby(
+            "question_id"
+        )["question_id"]
+        .transform("count")
+        .to_numpy()
+    )
+
+    full_sample_weight = (
+        1.0
+        / full_candidate_counts
+    )
+
+    final_model = HistGradientBoostingRegressor(
+        learning_rate=0.06,
+        max_iter=250,
+        max_leaf_nodes=15,
+        min_samples_leaf=30,
+        l2_regularization=1.0,
+        random_state=42,
+    )
+
+    final_model.fit(
+        candidate_df[
+            feature_columns
+        ].to_numpy(),
+        candidate_df[
+            "target_tiou"
+        ].to_numpy(),
+        sample_weight=full_sample_weight,
+    )
+
+    FINAL_MODEL_OUTPUT.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    joblib.dump(
+        {
+            "model": final_model,
+            "feature_columns": feature_columns,
+            "max_sentences": MAX_SENTENCES,
+            "training_questions": int(
+                positives["question_id"].nunique()
+            ),
+        },
+        FINAL_MODEL_OUTPUT,
+    )
+
+    print()
+    print(
+        f"Deployment ranker saved: "
+        f"{FINAL_MODEL_OUTPUT}"
     )
 
     print()

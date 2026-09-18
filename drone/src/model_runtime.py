@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
-import cv2
 import numpy as np
-import timm
 import torch
-from PIL import Image
-from torchvision import transforms
 from ultralytics import YOLO
 
 
@@ -25,541 +20,303 @@ OFFICIAL = (
 )
 
 if str(OFFICIAL) not in sys.path:
-    sys.path.insert(0, str(OFFICIAL))
-
-from dtos import DroneFlybyPredictionDto
-
-
-YOLO_MODEL = (
-    ROOT
-    / "drone"
-    / "artifacts"
-    / "exp_d010"
-    / "runs"
-    / "yolo11n_tiled_objectness"
-    / "weights"
-    / "best.pt"
-)
-
-CLASSIFIER_MODEL = (
-    ROOT
-    / "drone"
-    / "artifacts"
-    / "exp_d013"
-    / "classifier"
-    / "mobilenetv3_small_best.pt"
-)
-
-CLASSIFIER_META = (
-    ROOT
-    / "drone"
-    / "artifacts"
-    / "exp_d013"
-    / "classifier"
-    / "metadata.json"
-)
-
-
-YOLO_CONF = 0.025
-YOLO_NMS = 0.50
-
-CLASSIFIER_BATCH_SIZE = 16
-
-VIEW_W = 960
-VIEW_H = 540
-
-COLS = 2
-ROWS = 2
-OVERLAP = 0.20
-
-CROP_PADDING = 0.30
-
-
-DEVICE_NAME = (
-    "mps"
-    if torch.backends.mps.is_available()
-    else "cpu"
-)
-
-DEVICE = torch.device(DEVICE_NAME)
-
-
-def _iou(a, b) -> float:
-    x1 = max(float(a[0]), float(b[0]))
-    y1 = max(float(a[1]), float(b[1]))
-    x2 = min(float(a[2]), float(b[2]))
-    y2 = min(float(a[3]), float(b[3]))
-
-    intersection = (
-        max(0.0, x2 - x1)
-        * max(0.0, y2 - y1)
-    )
-
-    area_a = (
-        max(0.0, float(a[2] - a[0]))
-        * max(0.0, float(a[3] - a[1]))
-    )
-
-    area_b = (
-        max(0.0, float(b[2] - b[0]))
-        * max(0.0, float(b[3] - b[1]))
-    )
-
-    union = area_a + area_b - intersection
-
-    return intersection / union if union > 0 else 0.0
-
-
-def _make_starts(length, count, overlap):
-    tile_size = int(
-        round(
-            (length / count)
-            * (1.0 + overlap)
-        )
-    )
-
-    starts = np.linspace(
+    sys.path.insert(
         0,
-        length - tile_size,
-        count,
+        str(OFFICIAL),
     )
 
-    return [
-        (
-            int(round(start)),
-            int(round(start)) + tile_size,
+
+from dtos import (
+    OBJECT_CLASSES,
+    DroneFlybyPredictionDto,
+)
+
+from utils import (
+    clip_bbox_to_frame,
+    view_bbox_to_global,
+)
+
+
+MODEL_PATH = (
+    ROOT
+    / "drone"
+    / "artifacts"
+    / "exp_d032"
+    / "runs"
+    / "yolo11n_full_real_domain"
+    / "weights"
+    / "last.pt"
+)
+
+CONFIDENCE = 0.001
+NMS_IOU = 0.70
+IMAGE_SIZE = 960
+MAX_DETECTIONS = 300
+
+if torch.cuda.is_available():
+    DEVICE_NAME = "cuda:0"
+elif torch.backends.mps.is_available():
+    DEVICE_NAME = "mps"
+else:
+    DEVICE_NAME = "cpu"
+
+
+if not MODEL_PATH.exists():
+    raise FileNotFoundError(
+        f"D030 model not found: {MODEL_PATH}"
+    )
+
+
+print(
+    f"[Drone D030] loading "
+    f"{MODEL_PATH.name} "
+    f"on {DEVICE_NAME}..."
+)
+
+_MODEL = YOLO(
+    str(MODEL_PATH)
+)
+
+
+def _class_name(
+    names,
+    class_index: int,
+) -> str | None:
+
+    if isinstance(
+        names,
+        dict,
+    ):
+        value = names.get(
+            class_index
         )
-        for start in starts
-    ]
+    else:
+        if not (
+            0
+            <= class_index
+            < len(names)
+        ):
+            return None
 
+        value = names[
+            class_index
+        ]
 
-def _make_tiles(image):
-    xs = _make_starts(
-        VIEW_W,
-        COLS,
-        OVERLAP,
-    )
-
-    ys = _make_starts(
-        VIEW_H,
-        ROWS,
-        OVERLAP,
-    )
-
-    tiles = []
-
-    for y1, y2 in ys:
-        for x1, x2 in xs:
-            tiles.append(
-                {
-                    "image": image[y1:y2, x1:x2],
-                    "x1": x1,
-                    "y1": y1,
-                }
-            )
-
-    return tiles
-
-
-def _nms(boxes, scores):
-    if not boxes:
-        return [], []
-
-    order = np.argsort(
-        np.asarray(scores)
-    )[::-1]
-
-    keep_boxes = []
-    keep_scores = []
-
-    while len(order):
-        i = int(order[0])
-
-        keep_boxes.append(boxes[i])
-        keep_scores.append(scores[i])
-
-        remaining = []
-
-        for j in order[1:]:
-            j = int(j)
-
-            if _iou(
-                boxes[i],
-                boxes[j],
-            ) < YOLO_NMS:
-                remaining.append(j)
-
-        order = np.asarray(
-            remaining,
-            dtype=np.int64,
-        )
-
-    return keep_boxes, keep_scores
-
-
-def _crop_rgb(image, bbox):
-    x1, y1, x2, y2 = map(float, bbox)
-
-    width = x2 - x1
-    height = y2 - y1
-
-    px = width * CROP_PADDING
-    py = height * CROP_PADDING
-
-    image_h, image_w = image.shape[:2]
-
-    x1 = max(0, int(round(x1 - px)))
-    y1 = max(0, int(round(y1 - py)))
-    x2 = min(image_w, int(round(x2 + px)))
-    y2 = min(image_h, int(round(y2 + py)))
-
-    crop = image[y1:y2, x1:x2]
-
-    if crop.size == 0:
+    if value is None:
         return None
 
-    return cv2.cvtColor(
-        crop,
-        cv2.COLOR_BGR2RGB,
-    )
+    value = str(value)
 
+    if value not in OBJECT_CLASSES:
+        return None
 
-print(
-    f"[Drone] loading YOLO on {DEVICE_NAME}..."
-)
+    return value
 
-_YOLO = YOLO(
-    str(YOLO_MODEL)
-)
-
-
-_METADATA = json.loads(
-    CLASSIFIER_META.read_text()
-)
-
-_CLASSES = _METADATA["classes"]
-
-
-print(
-    f"[Drone] loading MobileNet on {DEVICE_NAME}..."
-)
-
-_CLASSIFIER = timm.create_model(
-    "mobilenetv3_small_100",
-    pretrained=False,
-    num_classes=len(_CLASSES),
-)
-
-_CLASSIFIER.load_state_dict(
-    torch.load(
-        CLASSIFIER_MODEL,
-        map_location="cpu",
-    )
-)
-
-_CLASSIFIER.eval()
-_CLASSIFIER.to(DEVICE)
-
-
-_TRANSFORM = transforms.Compose(
-    [
-        transforms.Resize(
-            (224, 224)
-        ),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[
-                0.485,
-                0.456,
-                0.406,
-            ],
-            std=[
-                0.229,
-                0.224,
-                0.225,
-            ],
-        ),
-    ]
-)
-
-def _warm_models() -> None:
+def _warm_model() -> None:
     print(
-        "[Drone] warming YOLO + MobileNet..."
+        "[Drone D030] warming YOLO..."
     )
 
-    dummy_frame = np.zeros(
+    dummy = np.zeros(
         (
-            VIEW_H,
-            VIEW_W,
+            540,
+            960,
             3,
         ),
         dtype=np.uint8,
     )
 
-    # Warm all four YOLO tile calls.
-    for tile in _make_tiles(
-        dummy_frame
-    ):
-        _YOLO.predict(
-            source=tile["image"],
-            imgsz=960,
-            conf=YOLO_CONF,
-            iou=0.70,
-            max_det=300,
+    for _ in range(2):
+        _MODEL.predict(
+            source=dummy,
+            imgsz=IMAGE_SIZE,
+            conf=CONFIDENCE,
+            iou=NMS_IOU,
+            max_det=MAX_DETECTIONS,
             device=DEVICE_NAME,
             verbose=False,
         )
 
-    # Warm the exact fixed classifier batch shape.
-    dummy_batch = torch.zeros(
-        (
-            CLASSIFIER_BATCH_SIZE,
-            3,
-            224,
-            224,
-        ),
-        dtype=torch.float32,
-        device=DEVICE,
-    )
-
-    with torch.inference_mode():
-        for _ in range(3):
-            _CLASSIFIER(
-                dummy_batch
-            )
-
-    if DEVICE.type == "mps":
+    if DEVICE_NAME == "mps":
         torch.mps.synchronize()
 
     print(
-        "[Drone] warmup complete"
+        "[Drone D030] warmup complete"
     )
+    
 
+print(
+    "[Drone runtime] "
+    f"model={MODEL_PATH} "
+    f"conf={CONFIDENCE} "
+    f"nms={NMS_IOU} "
+    f"imgsz={IMAGE_SIZE}"
+)
 
-_warm_models()
+_warm_model()
 
 
 @torch.inference_mode()
 def detect(
     image: np.ndarray,
+    source_region_xyxy,
     original_width: int,
     original_height: int,
 ) -> list[DroneFlybyPredictionDto]:
 
-    boxes = []
-    detector_scores = []
-
-    for tile in _make_tiles(image):
-
-        result = _YOLO.predict(
-            source=tile["image"],
-            imgsz=960,
-            conf=YOLO_CONF,
-            iou=0.70,
-            max_det=300,
-            device=DEVICE_NAME,
-            verbose=False,
-        )[0]
-
-        if result.boxes is None:
-            continue
-
-        tile_boxes = (
-            result.boxes.xyxy
-            .detach()
-            .cpu()
-            .numpy()
-        )
-
-        scores = (
-            result.boxes.conf
-            .detach()
-            .cpu()
-            .numpy()
-        )
-
-        for box, score in zip(
-            tile_boxes,
-            scores,
-        ):
-
-            boxes.append(
-                np.asarray(
-                    [
-                        float(box[0])
-                        + tile["x1"],
-
-                        float(box[1])
-                        + tile["y1"],
-
-                        float(box[2])
-                        + tile["x1"],
-
-                        float(box[3])
-                        + tile["y1"],
-                    ],
-                    dtype=np.float32,
-                )
-            )
-
-            detector_scores.append(
-                float(score)
-            )
-
-    boxes, detector_scores = _nms(
-        boxes,
-        detector_scores,
-    )
-
-    crops = []
-    valid_boxes = []
-    valid_detector_scores = []
-
-    for box, score in zip(
-        boxes,
-        detector_scores,
-    ):
-        crop = _crop_rgb(
-            image,
-            box,
-        )
-
-        if crop is None:
-            continue
-
-        crops.append(crop)
-        valid_boxes.append(box)
-        valid_detector_scores.append(score)
-
-    if not crops:
+    if image is None:
         return []
 
-    all_probabilities = []
+    image_height, image_width = (
+        image.shape[:2]
+    )
 
-    for start in range(
-        0,
-        len(crops),
-        CLASSIFIER_BATCH_SIZE,
+    if (
+        image_width <= 0
+        or image_height <= 0
     ):
-        chunk = crops[
-            start:
-            start + CLASSIFIER_BATCH_SIZE
-        ]
+        return []
 
-        tensors = [
-            _TRANSFORM(
-                Image.fromarray(
-                    crop
-                )
-            )
-            for crop in chunk
-        ]
-        
-        
+    result = _MODEL.predict(
+        source=image,
+        imgsz=IMAGE_SIZE,
+        conf=CONFIDENCE,
+        iou=NMS_IOU,
+        max_det=MAX_DETECTIONS,
+        device=DEVICE_NAME,
+        verbose=False,
+    )[0]
 
-        # Pad every classifier invocation to the same shape.
-        #
-        # This is intentional: stable MPS tensor shapes should avoid
-        # expensive graph recompilation when proposal count changes.
-        while len(tensors) < CLASSIFIER_BATCH_SIZE:
-            tensors.append(
-                torch.zeros_like(
-                    tensors[0]
-                )
-            )
+    if result.boxes is None:
+        return []
 
-        batch = torch.stack(
-            tensors
-        ).to(DEVICE)
+    boxes = (
+        result.boxes.xyxy
+        .detach()
+        .cpu()
+        .numpy()
+    )
 
-        chunk_probabilities = torch.softmax(
-            _CLASSIFIER(batch),
-            dim=1,
-        )
+    scores = (
+        result.boxes.conf
+        .detach()
+        .cpu()
+        .numpy()
+    )
 
-        # Remove predictions corresponding to padding.
-        chunk_probabilities = (
-            chunk_probabilities[
-                :len(chunk)
-            ]
-            .float()
-            .cpu()
-            .numpy()
-        )
-
-        all_probabilities.append(
-            chunk_probabilities
-        )
-
-    probabilities = np.concatenate(
-        all_probabilities,
-        axis=0,
+    classes = (
+        result.boxes.cls
+        .detach()
+        .cpu()
+        .numpy()
+        .astype(int)
     )
 
     annotations = []
 
-    for index, box in enumerate(
-        valid_boxes
+    for box, score, class_index in zip(
+        boxes,
+        scores,
+        classes,
     ):
-
-        class_index = int(
-            np.argmax(
-                probabilities[index]
-            )
+        class_name = _class_name(
+            result.names,
+            int(class_index),
         )
 
-        class_name = _CLASSES[
-            class_index
-        ]
+        if class_name is None:
+            continue
 
-        class_probability = float(
-            probabilities[
-                index,
-                class_index,
-            ]
+        x1, y1, x2, y2 = (
+            float(v)
+            for v in box
         )
 
-        confidence = float(
-            class_probability
-            * max(
-                valid_detector_scores[index],
-                1e-6,
-            )
+        # YOLO returns pixel coordinates relative
+        # to the received view. Convert to normalized
+        # coordinates relative to that view first.
+        local_bbox = (
+            max(
+                0.0,
+                min(
+                    1.0,
+                    x1 / image_width,
+                ),
+            ),
+            max(
+                0.0,
+                min(
+                    1.0,
+                    y1 / image_height,
+                ),
+            ),
+            max(
+                0.0,
+                min(
+                    1.0,
+                    x2 / image_width,
+                ),
+            ),
+            max(
+                0.0,
+                min(
+                    1.0,
+                    y2 / image_height,
+                ),
+            ),
         )
 
-        # L0 view pixel -> source pixel -> normalized global.
+        if (
+            local_bbox[2]
+            <= local_bbox[0]
+            or local_bbox[3]
+            <= local_bbox[1]
+        ):
+            continue
+
+        # Official helper:
         #
-        # At L0 the received 960x540 covers the entire
-        # 3840x2160 source frame.
-        x1 = float(box[0]) / VIEW_W
-        y1 = float(box[1]) / VIEW_H
-        x2 = float(box[2]) / VIEW_W
-        y2 = float(box[3]) / VIEW_H
+        # view-normalized
+        # -> source pixels
+        # -> full-frame normalized coordinates.
+        global_bbox = (
+            view_bbox_to_global(
+                local_bbox,
+                source_region_xyxy,
+                original_width,
+                original_height,
+            )
+        )
 
-        # Defensive clipping.
-        x1 = min(max(x1, 0.0), 1.0)
-        y1 = min(max(y1, 0.0), 1.0)
-        x2 = min(max(x2, 0.0), 1.0)
-        y2 = min(max(y2, 0.0), 1.0)
+        global_bbox = (
+            clip_bbox_to_frame(
+                global_bbox
+            )
+        )
 
-        if x2 <= x1 or y2 <= y1:
+        if global_bbox is None:
             continue
 
         annotations.append(
             DroneFlybyPredictionDto(
-                object_id=
-                    class_name,
-
-                bbox=[
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                ],
-
-                confidence=
-                    confidence,
+                object_id=class_name,
+                bbox=global_bbox,
+                confidence=float(
+                    max(
+                        0.0,
+                        min(
+                            1.0,
+                            float(score),
+                        ),
+                    )
+                ),
             )
         )
+
+        if (
+            len(annotations)
+            >= 500
+        ):
+            break
 
     return annotations

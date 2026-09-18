@@ -1,44 +1,114 @@
 from __future__ import annotations
 
-import base64
-import os
+import ast
 import re
-import sys
-import tempfile
+import shutil
 from pathlib import Path
-from typing import Any
 
-import joblib
+
+PATH = Path(
+    r"medical\src\runtime\predictor.py"
+)
+
+BACKUP = Path(
+    r"medical\src\runtime\predictor_pre_m049.py"
+)
+
+
+def replace_method(
+    text: str,
+    method_name: str,
+    next_method_name: str,
+    replacement: str,
+) -> str:
+    start_marker = (
+        f"    def {method_name}("
+    )
+
+    end_marker = (
+        f"    def {next_method_name}("
+    )
+
+    start = text.find(
+        start_marker
+    )
+
+    end = text.find(
+        end_marker,
+        start,
+    )
+
+    if start < 0:
+        raise RuntimeError(
+            f"Could not find "
+            f"{method_name}"
+        )
+
+    if end < 0:
+        raise RuntimeError(
+            f"Could not find "
+            f"{next_method_name}"
+        )
+
+    return (
+        text[:start]
+        + replacement.rstrip()
+        + "\n\n"
+        + text[end:]
+    )
+
+
+if not PATH.exists():
+    raise FileNotFoundError(
+        PATH
+    )
+
+if not BACKUP.exists():
+    shutil.copy2(
+        PATH,
+        BACKUP,
+    )
+
+text = PATH.read_text(
+    encoding="utf-8"
+)
+
+
+# ============================================================================
+# Imports
+# ============================================================================
+
+old = """import joblib
+import numpy as np
+import torch
+"""
+
+new = """import joblib
 import numpy as np
 import pandas as pd
 import torch
-from sentence_transformers import CrossEncoder
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+"""
 
+if old not in text:
+    raise RuntimeError(
+        "Could not patch pandas import."
+    )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-
-SENTENCE_RANKER_PATH = (
-    REPO_ROOT
-    / "medical"
-    / "artifacts"
-    / "models"
-    / "sentence_ranker.joblib"
+text = text.replace(
+    old,
+    new,
+    1,
 )
 
-ASR_MODEL_ID = "distil-large-v3"
-RETRIEVER_MODEL_ID = "cross-encoder/ms-marco-MiniLM-L6-v2"
-NLI_MODEL_ID = "cross-encoder/nli-deberta-v3-small"
 
-ASR_COMPUTE_TYPE = "int8_float32"
-ASR_BEAM_SIZE = 1
+# ============================================================================
+# Runtime paths / thresholds
+# ============================================================================
 
-LEXICAL_TOP_K = 8
-NLI_TOP_K = 5
+old = """CLASSIFICATION_THRESHOLD = 0.000585
+"""
 
-CLASSIFICATION_THRESHOLD = 0.000585
+new = """CLASSIFICATION_THRESHOLD = 0.000585
 
 META_CLASSIFIER_PATH = (
     REPO_ROOT
@@ -73,439 +143,33 @@ HYBRID_WORD_WINDOW_STRIDE = 3
 
 EVIDENCE_MAX_LENGTH = 192
 EVIDENCE_BATCH_SIZE = 128
+"""
 
-
-def configure_windows_cuda_dlls() -> None:
-    """
-    Add the local faster-whisper CUDA runtime directory before importing
-    CTranslate2/faster-whisper.
-
-    This keeps the known-working Pascal-compatible PyTorch installation
-    untouched.
-    """
-
-    if os.name != "nt":
-        return
-
-    root = (
-        REPO_ROOT
-        / "tools"
-        / "faster-whisper-cuda"
+if old not in text:
+    raise RuntimeError(
+        "Could not patch constants."
     )
 
-    if not root.exists():
-        return
+text = text.replace(
+    old,
+    new,
+    1,
+)
 
-    dll_matches = list(
-        root.rglob("cublas64_12.dll")
+
+# ============================================================================
+# Add hybrid-candidate + M042 surface helpers
+# ============================================================================
+
+marker = "\ndef get_label_indices(\n"
+
+if marker not in text:
+    raise RuntimeError(
+        "Could not find "
+        "get_label_indices marker."
     )
 
-    if not dll_matches:
-        return
-
-    dll_dir = dll_matches[0].parent
-
-    os.environ["PATH"] = (
-        str(dll_dir)
-        + os.pathsep
-        + os.environ.get("PATH", "")
-    )
-
-    if hasattr(os, "add_dll_directory"):
-        os.add_dll_directory(
-            str(dll_dir)
-        )
-
-
-configure_windows_cuda_dlls()
-
-from faster_whisper import WhisperModel  # noqa: E402
-
-def question_to_claim(question: str) -> str:
-    text = question.strip()
-
-    if text.endswith("?"):
-        text = text[:-1].strip()
-
-    prefix = ""
-
-    if "," in text:
-        first_part, remainder = text.split(
-            ",",
-            1,
-        )
-
-        remainder = remainder.strip()
-
-        auxiliary_starters = (
-            "does ",
-            "do ",
-            "did ",
-            "is ",
-            "are ",
-            "was ",
-            "were ",
-            "has ",
-            "have ",
-            "will ",
-            "should ",
-            "can ",
-        )
-
-        if remainder.lower().startswith(
-            auxiliary_starters
-        ):
-            prefix = (
-                first_part.strip()
-                + ", "
-            )
-
-            text = remainder
-
-    words = text.split()
-
-    if len(words) < 2:
-        return (
-            question.rstrip("?")
-            + "."
-        )
-
-    auxiliary = words[0].lower()
-
-    if (
-        auxiliary
-        in {
-            "is",
-            "are",
-            "was",
-            "were",
-        }
-        and words[1].lower()
-        == "there"
-    ):
-        remainder = " ".join(
-            words[2:]
-        )
-
-        claim = (
-            f"There {words[0].lower()} "
-            f"{remainder}"
-        )
-
-        return prefix + claim + "."
-
-    if auxiliary in {
-        "does",
-        "do",
-        "did",
-        "is",
-        "are",
-        "was",
-        "were",
-        "has",
-        "have",
-        "will",
-        "should",
-        "can",
-    }:
-        remainder = words[1:]
-
-        if (
-            len(remainder) >= 2
-            and remainder[0].lower()
-            == "the"
-        ):
-            subject_length = 2
-
-            if len(remainder) >= 3:
-                three_token_subjects = {
-                    "the blood pressure",
-                    "the heart rate",
-                    "the treatment plan",
-                    "the kidney function",
-                    "the liver function",
-                    "the diabetes medication",
-                    "the current medication",
-                    "the prescribed medication",
-                }
-
-                candidate = " ".join(
-                    token.lower()
-                    for token
-                    in remainder[:3]
-                )
-
-                if (
-                    candidate
-                    in three_token_subjects
-                ):
-                    subject_length = 3
-
-            subject = " ".join(
-                remainder[
-                    :subject_length
-                ]
-            )
-
-            predicate = " ".join(
-                remainder[
-                    subject_length:
-                ]
-            )
-
-        elif (
-            len(remainder) >= 2
-            and remainder[0].lower()
-            in {
-                "both",
-                "any",
-                "all",
-                "either",
-            }
-        ):
-            subject = " ".join(
-                remainder[:2]
-            )
-
-            predicate = " ".join(
-                remainder[2:]
-            )
-
-        else:
-            subject = remainder[0]
-
-            predicate = " ".join(
-                remainder[1:]
-            )
-
-        claim = (
-            f"{subject} "
-            f"{words[0].lower()} "
-            f"{predicate}"
-        ).strip()
-
-        claim = (
-            claim[0].upper()
-            + claim[1:]
-        )
-
-        return prefix + claim + "."
-
-    claim = text
-
-    if claim:
-        claim = (
-            claim[0].upper()
-            + claim[1:]
-        )
-
-    return prefix + claim + "."
-
-
-def lexical_scores(
-    query: str,
-    texts: list[str],
-) -> np.ndarray:
-    if not texts:
-        return np.zeros(
-            0,
-            dtype=float,
-        )
-
-    documents = texts + [query]
-
-    word_vectorizer = TfidfVectorizer(
-        lowercase=True,
-        ngram_range=(1, 2),
-        sublinear_tf=True,
-        token_pattern=r"(?u)\b\w+\b",
-    )
-
-    word_matrix = (
-        word_vectorizer
-        .fit_transform(
-            documents
-        )
-    )
-
-    word_scores = cosine_similarity(
-        word_matrix[-1],
-        word_matrix[:-1],
-    )[0]
-
-    char_vectorizer = TfidfVectorizer(
-        lowercase=True,
-        analyzer="char_wb",
-        ngram_range=(3, 5),
-        sublinear_tf=True,
-    )
-
-    char_matrix = (
-        char_vectorizer
-        .fit_transform(
-            documents
-        )
-    )
-
-    char_scores = cosine_similarity(
-        char_matrix[-1],
-        char_matrix[:-1],
-    )[0]
-
-    return (
-        0.55 * word_scores
-        + 0.45 * char_scores
-    )
-
-
-def temporal_iou(
-    start_a: float,
-    end_a: float,
-    start_b: float,
-    end_b: float,
-) -> float:
-    intersection = max(
-        0.0,
-        min(end_a, end_b)
-        - max(start_a, start_b),
-    )
-
-    union = (
-        max(end_a, end_b)
-        - min(start_a, start_b)
-    )
-
-    if union <= 0:
-        return 0.0
-
-    return intersection / union
-
-
-def is_sentence_end(
-    text: str,
-) -> bool:
-    return bool(
-        re.search(
-            r'[.!?]["\']?$',
-            text.strip(),
-        )
-    )
-
-
-def make_sentences(
-    words: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    if not words:
-        return []
-
-    sentences = []
-    start_index = 0
-
-    for index, word in enumerate(
-        words
-    ):
-        if not is_sentence_end(
-            str(word["word"])
-        ):
-            continue
-
-        text = "".join(
-            str(item["word"])
-            for item in words[
-                start_index:
-                index + 1
-            ]
-        ).strip()
-
-        if text:
-            sentences.append(
-                {
-                    "start": float(
-                        words[
-                            start_index
-                        ]["start"]
-                    ),
-                    "end": float(
-                        words[index][
-                            "end"
-                        ]
-                    ),
-                    "text": text,
-                }
-            )
-
-        start_index = index + 1
-
-    if start_index < len(words):
-        text = "".join(
-            str(item["word"])
-            for item in words[
-                start_index:
-            ]
-        ).strip()
-
-        if text:
-            sentences.append(
-                {
-                    "start": float(
-                        words[
-                            start_index
-                        ]["start"]
-                    ),
-                    "end": float(
-                        words[-1]["end"]
-                    ),
-                    "text": text,
-                }
-            )
-
-    return sentences
-
-
-def make_sentence_candidates(
-    sentences: list[dict[str, Any]],
-    max_sentences: int,
-) -> list[dict[str, Any]]:
-    candidates = []
-
-    for size in range(
-        1,
-        max_sentences + 1,
-    ):
-        for start in range(
-            len(sentences)
-            - size
-            + 1
-        ):
-            group = sentences[
-                start:
-                start + size
-            ]
-
-            text = " ".join(
-                str(item["text"])
-                for item in group
-            )
-
-            candidates.append(
-                {
-                    "sentence_count": size,
-                    "start": float(
-                        group[0]["start"]
-                    ),
-                    "end": float(
-                        group[-1]["end"]
-                    ),
-                    "text": text,
-                    "word_count": len(
-                        text.split()
-                    ),
-                }
-            )
-
-    return candidates
-
-
+helpers = r'''
 
 META_NEGATION_TERMS = {
     "no",
@@ -707,105 +371,50 @@ def make_meta_question_features(
         )
 
     return features
+'''
 
-def get_label_indices(
-    model,
-) -> dict[str, int]:
-    mapping = {
-        int(key): str(value).lower()
-        for key, value
-        in model.config.id2label.items()
-    }
-
-    result: dict[str, int] = {}
-
-    for index, label in mapping.items():
-        for target in (
-            "contradiction",
-            "entailment",
-            "neutral",
-        ):
-            if target in label:
-                result[target] = index
-
-    if len(result) != 3:
-        return {
-            "contradiction": 0,
-            "entailment": 1,
-            "neutral": 2,
-        }
-
-    return result
+text = text.replace(
+    marker,
+    helpers + marker,
+    1,
+)
 
 
-class MedicalPredictor:
-    def __init__(self) -> None:
-        if not SENTENCE_RANKER_PATH.exists():
-            raise FileNotFoundError(
-                "Deployment sentence ranker "
-                f"not found: "
-                f"{SENTENCE_RANKER_PATH}"
-            )
+# ============================================================================
+# Replace old sentence-ranker initialization with M042 + M049 models
+# ============================================================================
 
-        if not torch.cuda.is_available():
-            raise RuntimeError(
-                "CUDA is not available. "
-                "Medical runtime expects "
-                "the GTX 1060 CUDA environment."
-            )
-
-        self.device = "cuda"
-
-        print(
+start_marker = '''        print(
             "[medical] loading "
-            "faster-whisper..."
+            "sentence ranker..."
         )
+'''
 
-        self.asr = WhisperModel(
-            ASR_MODEL_ID,
-            device="cuda",
-            compute_type=(
-                ASR_COMPUTE_TYPE
-            ),
+end_marker = '''        print(
+            "[medical] runtime ready"
         )
+'''
 
-        print(
-            "[medical] loading "
-            "MS MARCO reranker..."
-        )
+start = text.find(
+    start_marker
+)
 
-        self.retriever = CrossEncoder(
-            RETRIEVER_MODEL_ID,
-            device=self.device,
-            max_length=256,
-        )
+end = text.find(
+    end_marker,
+    start,
+)
 
-        print(
-            "[medical] loading NLI..."
-        )
+if start < 0 or end < 0:
+    raise RuntimeError(
+        "Could not find old "
+        "sentence-ranker init block."
+    )
 
-        self.nli_tokenizer = (
-            AutoTokenizer.from_pretrained(
-                NLI_MODEL_ID
-            )
-        )
+end += len(
+    end_marker
+)
 
-        self.nli_model = (
-            AutoModelForSequenceClassification
-            .from_pretrained(
-                NLI_MODEL_ID
-            )
-            .to(self.device)
-            .eval()
-        )
-
-        self.nli_labels = (
-            get_label_indices(
-                self.nli_model
-            )
-        )
-
-        if not META_CLASSIFIER_PATH.exists():
+replacement = '''        if not META_CLASSIFIER_PATH.exists():
             raise FileNotFoundError(
                 "M042 meta-classifier "
                 f"not found: "
@@ -861,179 +470,20 @@ class MedicalPredictor:
         print(
             "[medical] runtime ready"
         )
+'''
 
-    def _transcribe(
-        self,
-        audio_bytes: bytes,
-        suffix: str,
-    ) -> tuple[
-        list[dict[str, Any]],
-        list[dict[str, Any]],
-    ]:
-        temp_path: str | None = None
+text = (
+    text[:start]
+    + replacement
+    + text[end:]
+)
 
-        try:
-            with tempfile.NamedTemporaryFile(
-                suffix=suffix,
-                delete=False,
-            ) as handle:
-                handle.write(
-                    audio_bytes
-                )
 
-                temp_path = (
-                    handle.name
-                )
+# ============================================================================
+# Replace _classify
+# ============================================================================
 
-            segment_generator, _ = (
-                self.asr.transcribe(
-                    temp_path,
-                    language="en",
-                    beam_size=(
-                        ASR_BEAM_SIZE
-                    ),
-                    word_timestamps=True,
-                )
-            )
-
-            raw_segments = list(
-                segment_generator
-            )
-
-            segments = []
-            words = []
-
-            for segment in raw_segments:
-                text = str(
-                    segment.text
-                ).strip()
-
-                if text:
-                    segments.append(
-                        {
-                            "start": float(
-                                segment.start
-                            ),
-                            "end": float(
-                                segment.end
-                            ),
-                            "text": text,
-                        }
-                    )
-
-                if not segment.words:
-                    continue
-
-                for word in segment.words:
-                    if (
-                        word.start is None
-                        or word.end is None
-                    ):
-                        continue
-
-                    words.append(
-                        {
-                            "start": float(
-                                word.start
-                            ),
-                            "end": float(
-                                word.end
-                            ),
-                            "word": str(
-                                word.word
-                            ),
-                        }
-                    )
-
-            if not segments:
-                raise RuntimeError(
-                    "ASR returned no segments."
-                )
-
-            if not words:
-                raise RuntimeError(
-                    "ASR returned no "
-                    "timestamped words."
-                )
-
-            return (
-                segments,
-                words,
-            )
-
-        finally:
-            if (
-                temp_path is not None
-                and os.path.exists(
-                    temp_path
-                )
-            ):
-                try:
-                    os.remove(
-                        temp_path
-                    )
-                except OSError:
-                    pass
-
-    def _semantic_segment_ranking(
-        self,
-        question: str,
-        segments: list[
-            dict[str, Any]
-        ],
-    ) -> list[int]:
-        texts = [
-            str(segment["text"])
-            for segment in segments
-        ]
-
-        lexical = lexical_scores(
-            question,
-            texts,
-        )
-
-        lexical_indices = (
-            np.argsort(
-                lexical
-            )[::-1][
-                :min(
-                    LEXICAL_TOP_K,
-                    len(segments),
-                )
-            ]
-        )
-
-        pairs = [
-            (
-                question,
-                texts[int(index)],
-            )
-            for index
-            in lexical_indices
-        ]
-
-        semantic = np.asarray(
-            self.retriever.predict(
-                pairs,
-                batch_size=32,
-                show_progress_bar=False,
-            )
-        ).reshape(-1)
-
-        order = np.argsort(
-            semantic
-        )[::-1]
-
-        return [
-            int(
-                lexical_indices[
-                    position
-                ]
-            )
-            for position in order
-        ]
-
-    def _classify(
+classify_method = r'''    def _classify(
         self,
         question: str,
         segments: list[
@@ -1271,8 +721,21 @@ class MedicalPredictor:
             ),
             **feature_values,
         }
+'''
 
-    def _select_evidence(
+text = replace_method(
+    text,
+    "_classify",
+    "_select_evidence",
+    classify_method,
+)
+
+
+# ============================================================================
+# Replace _select_evidence
+# ============================================================================
+
+evidence_method = r'''    def _select_evidence(
         self,
         question: str,
         segments: list[
@@ -1442,71 +905,37 @@ class MedicalPredictor:
                 ]
             ),
         )
+'''
 
-    def predict_request(
-        self,
-        *,
-        audio_base64: str,
-        audio_filename: str,
-        questions: list[str],
-    ) -> dict[str, list[Any]]:
-        count = len(questions)
+text = replace_method(
+    text,
+    "_select_evidence",
+    "predict_request",
+    evidence_method,
+)
 
-        fallback = {
-            "answers": [
-                False
-                for _ in range(count)
-            ],
-            "evidence_start": [
-                None
-                for _ in range(count)
-            ],
-            "evidence_end": [
-                None
-                for _ in range(count)
-            ],
-        }
 
-        if count == 0:
-            return fallback
+# ============================================================================
+# Patch predict_request question loop
+# ============================================================================
 
-        try:
-            audio_bytes = (
-                base64.b64decode(
-                    audio_base64,
-                    validate=True,
-                )
-            )
+loop_start = text.find(
+    "        for question in questions:\n"
+)
 
-            suffix = (
-                Path(
-                    audio_filename
-                    or "audio.mp3"
-                ).suffix
-                or ".mp3"
-            )
+loop_end = text.find(
+    "        return {\n"
+    "            \"answers\": answers,",
+    loop_start,
+)
 
-            segments, words = (
-                self._transcribe(
-                    audio_bytes,
-                    suffix,
-                )
-            )
+if loop_start < 0 or loop_end < 0:
+    raise RuntimeError(
+        "Could not find "
+        "predict_request loop."
+    )
 
-        except Exception as exc:
-            print(
-                "[medical] ASR failure:",
-                repr(exc),
-                file=sys.stderr,
-            )
-
-            return fallback
-
-        answers = []
-        evidence_start = []
-        evidence_end = []
-
-        for question in questions:
+new_loop = r'''        for question in questions:
             try:
                 ranked_segments = (
                     self
@@ -1662,49 +1091,51 @@ class MedicalPredictor:
                     None
                 )
 
-        return {
-            "answers": answers,
-            "evidence_start": (
-                evidence_start
-            ),
-            "evidence_end": (
-                evidence_end
-            ),
-        }
+'''
+
+text = (
+    text[:loop_start]
+    + new_loop
+    + text[loop_end:]
+)
 
 
-def decode_and_predict(
-    predictor: MedicalPredictor,
-    payload: dict[str, Any],
-) -> dict[str, list[Any]]:
-    questions = payload.get(
-        "questions",
-        []
-    )
+# ============================================================================
+# Validate generated Python before writing
+# ============================================================================
 
-    if not isinstance(
-        questions,
-        list,
-    ):
-        questions = []
+ast.parse(
+    text
+)
 
-    questions = [
-        str(question)
-        for question in questions
-    ]
+PATH.write_text(
+    text,
+    encoding="utf-8",
+)
 
-    return predictor.predict_request(
-        audio_base64=str(
-            payload.get(
-                "audio_base64",
-                "",
-            )
-        ),
-        audio_filename=str(
-            payload.get(
-                "audio_filename",
-                "audio.mp3",
-            )
-        ),
-        questions=questions,
-    )
+print(
+    "M049 predictor patch complete."
+)
+
+print(
+    f"Patched: {PATH}"
+)
+
+print(
+    f"Backup:  {BACKUP}"
+)
+
+print(
+    "M018 threshold:",
+    0.000585,
+)
+
+print(
+    "M042 threshold:",
+    0.384878,
+)
+
+print(
+    "M049 evidence gate:",
+    0.369304,
+)

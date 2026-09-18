@@ -33,6 +33,10 @@ OUTPUT = Path(
     r"medical\artifacts\retrieval\supervised_sentence_ranker_results.csv"
 )
 
+ALL_CANDIDATES_OUTPUT = Path(
+    r"medical\artifacts\retrieval\m025_all_candidate_oof_scores.csv"
+)
+
 FINAL_MODEL_OUTPUT = Path(
     r"medical\artifacts\models\sentence_ranker.joblib"
 )
@@ -655,6 +659,21 @@ def main() -> None:
         predictions[index]
         for index in candidate_df.index
     ]
+    
+    ALL_CANDIDATES_OUTPUT.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    candidate_df.to_csv(
+        ALL_CANDIDATES_OUTPUT,
+        index=False,
+    )
+
+    print(
+        f"All-candidate OOF scores: "
+        f"{ALL_CANDIDATES_OUTPUT}"
+    )
 
     selected_rows = []
 

@@ -2541,3 +2541,1548 @@ Worst-case latency of 11.54 seconds is comfortably below the 60-second per-reque
 KEEP and FREEZE for first official validation.
 
 Do not make further model-selection changes before obtaining an external validation score.
+
+---
+
+## EXP-M029 — First Official Hidden Validation
+
+### Goal
+
+Measure the frozen Medical Appointment pipeline on the official hidden validation set before using the single allowed evaluation attempt.
+
+### Deployment
+
+Public endpoint:
+
+ngrok HTTPS tunnel → Windows GTX 1060 Medical FastAPI endpoint
+
+Pipeline:
+
+* faster-whisper `distil-large-v3`
+* CUDA `int8_float32`
+* beam size 1
+* word timestamps
+* lexical TF-IDF retrieval
+* MS MARCO MiniLM reranking
+* DeBERTa-v3-small segmentwise NLI classification
+* frozen max-segment-margin operating threshold
+* supervised 1–3 sentence evidence ranker trained on all supplied positive training examples
+
+### Official result
+
+* Score: **0.5843964099377816**
+* Service errors: **0**
+* Attempt completed successfully
+
+Submitted:
+
+2026-09-17 23:11:13 UTC
+
+Finished:
+
+2026-09-17 23:13:34 UTC
+
+### Comparison
+
+OOF development composite:
+
+* 0.6038
+
+Full supplied-data endpoint score:
+
+* 0.6000
+
+Official hidden validation:
+
+* 0.5844
+
+Difference versus local deployed score:
+
+* -0.0156 absolute
+
+### Interpretation
+
+The hidden-validation score is close to both the conversation-disjoint development estimate and the full local endpoint score.
+
+There is no evidence of catastrophic train/validation overfitting.
+
+The endpoint completed successfully without service errors, confirming that the deployment architecture, public tunnel, request handling, response schema, and runtime are operational under the official evaluator.
+
+The small hidden-set degradation is consistent with normal generalization loss.
+
+The official validation score should now be treated as the strongest available external estimate of final performance.
+
+### Decision
+
+KEEP as the current frozen competition system.
+
+Do not spend the single evaluation attempt yet.
+
+Only replace this system if a subsequent change shows a convincing conversation-disjoint improvement locally and has a clear technical justification.
+
+---
+
+## EXP-M030 — Fine-Tuned Sentence Cross-Encoder
+
+### Hypothesis
+
+The generic MS MARCO cross-encoder failed to exploit the high-quality sentence candidate space zero-shot, but task-specific fine-tuning on temporal-IoU supervision may learn the Medical Appointment evidence-ranking objective directly.
+
+### Model
+
+Base:
+
+`cross-encoder/ms-marco-MiniLM-L6-v2`
+
+Training target:
+
+candidate temporal IoU with annotated evidence
+
+Candidate space:
+
+contiguous 1–3 sentence groups derived from faster-whisper word timestamps
+
+Training candidate sampling:
+
+* positive / near-positive candidates
+* high-scoring hard negatives
+* random negatives
+
+### Validation methodology
+
+5-fold GroupKFold grouped by `transcript_id`.
+
+No consultation appears in both training and held-out evaluation within a fold.
+
+Held-out gold timestamps are used only for scoring.
+
+### Results
+
+195 gold-positive questions.
+
+OOF localization:
+
+* mean tIoU: 0.5089
+* median tIoU: 0.5274
+* any overlap: 0.7590
+* tIoU >= 0.25: 0.7128
+* tIoU >= 0.50: 0.5128
+* tIoU >= 0.75: 0.3692
+
+Candidate oracle:
+
+* mean tIoU: 0.7997
+
+Wall time:
+
+* 368.0 seconds
+
+### Comparison
+
+EXP-M025 supervised HGB:
+
+* mean tIoU: 0.4771
+
+EXP-M030 fine-tuned cross-encoder:
+
+* mean tIoU: 0.5089
+
+Improvement:
+
+* +0.0318 absolute mean tIoU
+* approximately +6.7% relative
+
+### Interpretation
+
+Task-specific neural supervision meaningfully improves evidence ranking over both the generic zero-shot cross-encoder and the handcrafted-feature gradient boosting model.
+
+The improvement appears across mean, median, overlap rate, and high-IoU thresholds.
+
+A substantial gap remains to the 0.7997 candidate oracle, leaving room for ranking improvements and model ensembling.
+
+### Decision
+
+KEEP.
+
+Next step: combine EXP-M030 evidence with the frozen EXP-M018 classifier and calculate conversation-disjoint composite score before producing a deployment model.
+
+---
+
+## EXP-M031 — M030 Composite Development Score
+
+### Goal
+
+Measure the end-to-end development score from combining the frozen EXP-M018 classifier with the improved EXP-M030 fine-tuned neural evidence ranker.
+
+### Components
+
+Classification:
+
+EXP-M018 `max_segment_margin`
+
+* OOF accuracy: 0.8821
+* positive accuracy: 0.8718
+* hard-negative accuracy: 0.8662
+* off-topic accuracy: 0.9623
+
+Evidence:
+
+EXP-M030 fine-tuned sentence cross-encoder
+
+* OOF mean evidence tIoU: 0.5089
+
+### Results
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4428
+* Composite score: 0.6185
+
+Gold-positive questions predicted YES:
+
+170 / 195
+
+Mean tIoU among returned gold-positive spans:
+
+0.5079
+
+### Comparison
+
+EXP-M026:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4183
+* Composite: 0.6038
+
+EXP-M031:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4428
+* Composite: 0.6185
+
+Composite improvement:
+
++0.0147
+
+### Interpretation
+
+Task-specific neural evidence ranking produces a meaningful end-to-end improvement while holding classification constant.
+
+The result is conversation-disjoint and therefore materially stronger evidence than an improvement measured only on the full supplied training set.
+
+### Decision
+
+KEEP.
+
+Current best OOF development system.
+
+Next: measure complementarity between the M025 HGB ranker and M030 neural ranker before investing in a candidate-level ensemble.
+## EXP-M031 — M030 Composite Development Score
+
+### Goal
+
+Measure the end-to-end development score from combining the frozen EXP-M018 classifier with the improved EXP-M030 fine-tuned neural evidence ranker.
+
+### Components
+
+Classification:
+
+EXP-M018 `max_segment_margin`
+
+* OOF accuracy: 0.8821
+* positive accuracy: 0.8718
+* hard-negative accuracy: 0.8662
+* off-topic accuracy: 0.9623
+
+Evidence:
+
+EXP-M030 fine-tuned sentence cross-encoder
+
+* OOF mean evidence tIoU: 0.5089
+
+### Results
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4428
+* Composite score: 0.6185
+
+Gold-positive questions predicted YES:
+
+170 / 195
+
+Mean tIoU among returned gold-positive spans:
+
+0.5079
+
+### Comparison
+
+EXP-M026:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4183
+* Composite: 0.6038
+
+EXP-M031:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4428
+* Composite: 0.6185
+
+Composite improvement:
+
++0.0147
+
+### Interpretation
+
+Task-specific neural evidence ranking produces a meaningful end-to-end improvement while holding classification constant.
+
+The result is conversation-disjoint and therefore materially stronger evidence than an improvement measured only on the full supplied training set.
+
+### Decision
+
+KEEP.
+
+Current best OOF development system.
+
+Next: measure complementarity between the M025 HGB ranker and M030 neural ranker before investing in a candidate-level ensemble.
+## EXP-M031 — M030 Composite Development Score
+
+### Goal
+
+Measure the end-to-end development score from combining the frozen EXP-M018 classifier with the improved EXP-M030 fine-tuned neural evidence ranker.
+
+### Components
+
+Classification:
+
+EXP-M018 `max_segment_margin`
+
+* OOF accuracy: 0.8821
+* positive accuracy: 0.8718
+* hard-negative accuracy: 0.8662
+* off-topic accuracy: 0.9623
+
+Evidence:
+
+EXP-M030 fine-tuned sentence cross-encoder
+
+* OOF mean evidence tIoU: 0.5089
+
+### Results
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4428
+* Composite score: 0.6185
+
+Gold-positive questions predicted YES:
+
+170 / 195
+
+Mean tIoU among returned gold-positive spans:
+
+0.5079
+
+### Comparison
+
+EXP-M026:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4183
+* Composite: 0.6038
+
+EXP-M031:
+
+* Accuracy: 0.8821
+* Mean scored tIoU: 0.4428
+* Composite: 0.6185
+
+Composite improvement:
+
++0.0147
+
+### Interpretation
+
+Task-specific neural evidence ranking produces a meaningful end-to-end improvement while holding classification constant.
+
+The result is conversation-disjoint and therefore materially stronger evidence than an improvement measured only on the full supplied training set.
+
+### Decision
+
+KEEP.
+
+Current best OOF development system.
+
+Next: measure complementarity between the M025 HGB ranker and M030 neural ranker before investing in a candidate-level ensemble.
+
+---
+
+## EXP-M032A — Evidence Ranker Complementarity
+
+### Goal
+
+Determine whether the EXP-M025 HGB evidence ranker and EXP-M030 fine-tuned neural ranker make sufficiently different localization errors to justify an ensemble.
+
+### Results
+
+Individual systems:
+
+* M025 HGB mean tIoU: 0.4771
+* M030 neural mean tIoU: 0.5089
+
+Selected-span agreement:
+
+* same span: 87/195 = 0.4462
+
+Comparison:
+
+* neural better: 50 questions
+* HGB better: 38 questions
+* tie: 107 questions
+
+Oracle selector between the two selected spans:
+
+* mean tIoU: 0.5862
+* median tIoU: 0.6316
+* tIoU >= 0.50: 0.6205
+* tIoU >= 0.75: 0.4513
+
+Oracle gain over M030:
+
++0.0773 mean tIoU
+
+### Interpretation
+
+The two rankers are substantially complementary.
+
+Although M030 is stronger on average, M025 selects a better span for 38/195 questions.
+
+An ideal selector between only these two outputs would raise evidence localization from 0.5089 to 0.5862 without changing candidate generation.
+
+This is enough potential gain to justify a confidence-based selector before attempting additional expensive model training.
+
+### Decision
+
+KEEP.
+
+Proceed to a conversation-disjoint selector using only inference-available confidence signals.
+
+---
+
+## EXP-M032B — Confidence-Gated Evidence Selector
+
+### Hypothesis
+
+The complementary M025 and M030 evidence rankers may be combined by choosing between their top spans according to their confidence difference.
+
+### Validation
+
+A single confidence-difference threshold was calibrated conversation-disjoint using 5-fold GroupKFold.
+
+### Results
+
+Evidence OOF:
+
+* M025 HGB: 0.4771
+* M030 neural: 0.5089
+* raw confidence selector: 0.5195
+* CV-calibrated selector: 0.5052
+* oracle of the two selected spans: 0.5862
+
+CV selector:
+
+* neural selected: 121/195
+* HGB selected: 74/195
+
+Fold thresholds:
+
+* -0.208334
+* +0.084716
+* +0.023157
+* +0.023157
+* +0.023157
+
+Composite:
+
+* classification accuracy: 0.8821
+* mean scored tIoU: 0.4375
+* composite: 0.6153
+
+Reference M031 composite:
+
+0.6185
+
+### Interpretation
+
+The rankers are complementary, but their raw confidence scales are not consistently comparable across folds.
+
+Threshold calibration is unstable and reduces OOF performance below M030 alone.
+
+The raw 0.5195 result is diagnostic but is not sufficient justification for deployment
+
+---
+
+## EXP-M033 — Candidate-Level Score Fusion
+
+### Hypothesis
+
+Rank-normalized candidate-level fusion of the M025 HGB ranker and M030 fine-tuned neural ranker may exploit their complementary errors better than choosing only between their final top spans.
+
+### Validation
+
+5-fold conversation-disjoint calibration of the neural fusion weight.
+
+### Results
+
+OOF evidence:
+
+* mean tIoU: 0.5035
+* median tIoU: 0.5367
+* any overlap: 0.7128
+* tIoU >= 0.50: 0.5128
+* tIoU >= 0.75: 0.4000
+
+Fold neural weights:
+
+* 0.85
+* 0.50
+* 0.95
+* 0.50
+* 0.50
+
+Mean neural weight:
+
+0.660
+
+Composite:
+
+* classification accuracy: 0.8821
+* mean scored tIoU: 0.4337
+* composite score: 0.6130
+
+References:
+
+* M030 evidence: 0.5089
+* M031 composite: 0.6185
+* candidate oracle: 0.7997
+
+### Interpretation
+
+Candidate-level fusion does not improve mean localization relative to M030.
+
+The preferred fusion weight varies substantially across folds, indicating limited stability.
+
+Although the proportion of high-quality spans at tIoU >= 0.75 improves, the mean score decreases, which is what matters for the official metric.
+
+### Decision
+
+DISCARD.
+
+Keep M030 as the evidence-ranking reference.
+
+---
+
+## EXP-M034 — Hybrid Candidate Geometry Ceiling
+
+### Goal
+
+Measure whether supplementing sentence candidates with short word-window candidates increases the evidence-localization ceiling.
+
+### Candidate space
+
+Existing candidates:
+
+* 1 sentence
+* 2 consecutive sentences
+* 3 consecutive sentences
+
+Additional word windows:
+
+* 6 words
+* 10 words
+* 14 words
+* 18 words
+* 24 words
+* 32 words
+
+Word-window stride:
+
+3 words
+
+### Results
+
+Oracle localization:
+
+* mean tIoU: 0.8541
+* median tIoU: 0.9127
+* minimum tIoU: 0.2353
+* tIoU >= 0.50: 0.9590
+* tIoU >= 0.75: 0.8256
+* tIoU >= 0.90: 0.5590
+
+Candidate volume:
+
+* mean candidates per conversation: 760.5
+* maximum candidates per conversation: 1468
+
+Oracle winner types:
+
+* sentence_1: 107
+* sentence_2: 28
+* sentence_3: 4
+* word_6: 28
+* word_10: 18
+* word_14: 4
+* word_18: 3
+* word_24: 2
+* word_32: 1
+
+### Comparison
+
+Sentence-only oracle:
+
+0.7997
+
+Hybrid oracle:
+
+0.8541
+
+Improvement:
+
++0.0544 mean tIoU
+
+Unrestricted word-timestamp oracle:
+
+0.9294
+
+### Interpretation
+
+Short word windows materially improve candidate geometry.
+
+Most of the additional oracle wins come from 6-word and 10-word windows. Larger word-window sizes contribute comparatively few unique wins while substantially increasing candidate volume.
+
+The full hybrid candidate space is too large to score exhaustively with a neural cross-encoder within the competition latency budget.
+
+### Decision
+
+KEEP candidate-geometry direction.
+
+Next: determine the smallest hybrid candidate configuration that preserves most of the 0.8541 oracle ceiling.
+
+---
+
+## EXP-M035 — Hybrid Candidate Ablation
+
+### Goal
+
+Find the smallest evidence candidate space that preserves most of the localization ceiling gained in EXP-M034.
+
+### Results
+
+Sentence-only:
+
+* oracle mean tIoU: 0.7997
+* mean candidates: 158.2
+* max candidates: 249
+
+Sentences + 6-word windows:
+
+* oracle mean tIoU: 0.8332
+* mean candidates: 261.0
+* max candidates: 457
+
+Sentences + 6- and 10-word windows:
+
+* oracle mean tIoU: 0.8447
+* mean candidates: 362.7
+* max candidates: 663
+
+Sentences + 6-, 10-, and 14-word windows:
+
+* oracle mean tIoU: 0.8481
+* mean candidates: 463.8
+* max candidates: 867
+
+Sentences + 6-, 10-, 14-, and 18-word windows:
+
+* oracle mean tIoU: 0.8516
+* mean candidates: 564.3
+* max candidates: 1067
+
+Full hybrid:
+
+* oracle mean tIoU: 0.8541
+* mean candidates: 760.5
+* max candidates: 1468
+
+### Interpretation
+
+The majority of the candidate-geometry improvement comes from short 6- and 10-word windows.
+
+`sentences + w6 + w10` improves the oracle from 0.7997 to 0.8447, recovering approximately 83% of the total EXP-M034 oracle improvement while using less than half the candidate volume of the full hybrid set.
+
+Larger word windows provide diminishing returns relative to their inference cost.
+
+### Decision
+
+KEEP `sentence + word_6 + word_10` as the next candidate space.
+
+Do not add larger word-window families unless the compact hybrid model demonstrates that candidate geometry is still the dominant bottleneck.
+
+
+---
+
+## EXP-M036 — Fine-Tuned Hybrid Evidence Cross-Encoder
+
+### Hypothesis
+
+Expanding the EXP-M030 sentence candidate space with compact 6-word and 10-word windows may improve evidence localization while preserving a manageable inference candidate count.
+
+### Controlled change
+
+EXP-M030:
+
+* 1–3 sentence candidates
+
+EXP-M036:
+
+* 1–3 sentence candidates
+* 6-word windows
+* 10-word windows
+* word-window stride 3
+
+All other major training settings were retained from EXP-M030:
+
+* base model: `cross-encoder/ms-marco-MiniLM-L6-v2`
+* 5-fold GroupKFold by conversation
+* temporal-IoU supervision
+* hard-negative sampling
+* optimizer and learning rate
+* epoch count
+* batch configuration
+
+### Results
+
+195 gold-positive questions.
+
+OOF localization:
+
+* mean tIoU: 0.5144
+* median tIoU: 0.5650
+* any overlap: 0.7590
+* tIoU >= 0.25: 0.7128
+* tIoU >= 0.50: 0.5590
+* tIoU >= 0.75: 0.3641
+
+Compact hybrid candidate oracle:
+
+* mean tIoU: 0.8447
+
+Wall time:
+
+* 508.6 seconds
+
+### Comparison with EXP-M030
+
+EXP-M030:
+
+* mean tIoU: 0.5089
+* median tIoU: 0.5274
+* tIoU >= 0.50: 0.5128
+* tIoU >= 0.75: 0.3692
+
+EXP-M036:
+
+* mean tIoU: 0.5144
+* median tIoU: 0.5650
+* tIoU >= 0.50: 0.5590
+* tIoU >= 0.75: 0.3641
+
+Mean improvement:
+
++0.0055
+
+### Interpretation
+
+The compact hybrid candidate space produces a measurable but modest improvement in mean OOF tIoU.
+
+It substantially increases the proportion of questions reaching at least 0.50 tIoU, but does not improve the highest-quality localization tail.
+
+The large gap between realized OOF performance (0.5144) and the compact candidate oracle (0.8447) indicates ranking, rather than candidate geometry, remains the dominant bottleneck.
+
+### Decision
+
+KEEP as an experimental improvement.
+
+Do not replace the deployed system until the composite score with the frozen EXP-M018 classifier is measured.
+
+---
+
+## EXP-M037 — M036 Hybrid Composite Development Score
+
+### Goal
+
+Measure whether the higher candidate-space ceiling from EXP-M036 translates into a meaningful end-to-end score improvement with the frozen EXP-M018 classifier.
+
+### Results
+
+Classification:
+
+* accuracy: 0.8821
+* gold-positive questions predicted YES: 170/195
+
+Evidence:
+
+* M036 overall OOF mean tIoU: 0.5144
+* mean scored tIoU: 0.4436
+* tIoU among returned gold positives: 0.5089
+
+Composite:
+
+* 0.6190
+
+### Comparison
+
+EXP-M031 sentence-neural composite:
+
+* 0.6185
+
+EXP-M037 hybrid-neural composite:
+
+* 0.6190
+
+Improvement:
+
+* +0.0005
+
+### Interpretation
+
+The compact hybrid candidate space provides a small localization improvement but almost none of it translates into the final scored positive subset.
+
+The additional inference burden is therefore not justified for deployment at this stage.
+
+The large remaining oracle gap indicates that ranking quality, rather than candidate geometry, is the dominant evidence-localization bottleneck.
+
+### Decision
+
+Do not deploy EXP-M036.
+
+Keep EXP-M030 / EXP-M031 as the current evidence reference.
+
+Next experiment: improve the neural ranking objective directly.
+
+---
+
+## EXP-M038 — MiniLM-L12 Hybrid Cross-Encoder
+
+Hypothesis:
+Increasing cross-encoder capacity from MiniLM-L6 to MiniLM-L12 may improve ranking within the compact hybrid candidate space.
+
+Change made:
+- Base model: cross-encoder/ms-marco-MiniLM-L12-v2
+- Same sentence + 6/10-word candidate geometry as M036
+- Same 5-fold conversation-disjoint validation
+- Batch size reduced for GTX 1060 6 GB
+
+Results:
+- Mean tIoU: 0.4977
+- Median tIoU: 0.5526
+- Any overlap: 0.7385
+- tIoU >= 0.50: 0.5436
+- tIoU >= 0.75: 0.3487
+- Candidate oracle: 0.8447
+- Wall time: 1021.1 s
+
+Reference:
+- M030 L6 sentence: 0.5089
+- M036 L6 hybrid: 0.5144
+
+Interpretation:
+The larger L12 cross-encoder is both slower and worse than the L6 hybrid model. Increased model capacity does not improve this task under the current training objective.
+
+Decision:
+DISCARD.
+
+---
+
+## EXP-M041 — Four-Seed Evidence Ensemble
+
+### Hypothesis
+
+Averaging independently fine-tuned M036 models across four random seeds may reduce ranking variance and outperform any individual seed.
+
+### Models
+
+Same architecture and training configuration:
+
+* `cross-encoder/ms-marco-MiniLM-L6-v2`
+* compact hybrid sentence + 6-word + 10-word candidates
+* 4 epochs
+* learning rate 2e-5
+
+Seeds:
+
+* 42
+* 1337
+* 2026
+* 31415
+
+### Individual OOF results
+
+* seed 42: 0.5144
+* seed 1337: 0.5018
+* seed 2026: 0.5179
+* seed 31415: 0.5067
+
+### Ensemble results
+
+Equal raw-score mean:
+
+* mean tIoU: 0.5096
+* median tIoU: 0.5610
+* any overlap: 0.7641
+* tIoU >= 0.50: 0.5487
+* tIoU >= 0.75: 0.3538
+
+Within-question rank mean:
+
+* mean tIoU: 0.5099
+
+Median-score ensemble:
+
+* mean tIoU: 0.5095
+
+### Composite
+
+Using the frozen M018 classifier:
+
+* accuracy: 0.8821
+* mean scored tIoU: 0.4388
+* composite: 0.6161
+
+Reference M037:
+
+* composite: 0.6190
+
+### Interpretation
+
+The independent seed models do not combine beneficially through simple score averaging.
+
+Averaging appears to smooth useful high-confidence candidate distinctions rather than reduce harmful variance.
+
+The best individual seed is 2026 at 0.5179, but choosing it after observing OOF performance would introduce seed-selection optimism.
+
+### Decision
+
+DISCARD seed ensemble.
+
+Retain M036/M037 as the clean development reference.
+
+
+---
+
+## EXP-M042 — Composite-Aware Meta-Classifier
+
+### Hypothesis
+
+A supervised meta-classifier combining multiple NLI confidence signals can recover additional gold-positive questions and improve the competition composite score, even if raw accuracy decreases slightly.
+
+### Validation
+
+5-fold GroupKFold grouped by `transcript_id`.
+
+Decision thresholds were calibrated only on training conversations in each fold.
+
+Threshold optimization used the actual competition objective:
+
+`0.4 × Accuracy + 0.6 × mean positive tIoU`
+
+Gold labels, question type, correctness, and evidence annotations were not used as inference-time model features.
+
+### Logistic regression
+
+* accuracy: 0.8410
+* mean scored tIoU: 0.4646
+* composite: 0.6152
+* TP / FN: 175 / 20
+* TN / FP: 153 / 42
+
+Decision: DISCARD.
+
+### HistGradientBoosting classifier
+
+* accuracy: 0.8744
+* mean scored tIoU: 0.4665
+* composite: 0.6297
+* predicted YES rate: 0.5333
+* TP / FN: 177 / 18
+* TN / FP: 164 / 31
+
+Fold composites:
+
+* fold 1: 0.6339
+* fold 2: 0.7119
+* fold 3: 0.6234
+* fold 4: 0.6335
+* fold 5: 0.5347
+
+Reference EXP-M037:
+
+* accuracy: 0.8821
+* mean scored tIoU: 0.4436
+* composite: 0.6190
+
+Composite improvement:
+
++0.0107
+
+### Interpretation
+
+The HGB meta-classifier improves the competition objective by recovering seven additional gold-positive questions.
+
+The score improvement is large enough to keep, but one held-out fold performs substantially worse than the others.
+
+Because the feature set includes question-surface variables such as auxiliary verb, length, number presence, and negation, a targeted ablation is required before deployment to determine whether the gain depends on potentially brittle question-template shortcuts.
+
+### Decision
+
+KEEP as experimental best classifier.
+
+Do not deploy until NLI-only versus question-surface feature ablation is complete.
+
+---
+
+## EXP-M043 — Meta-Classifier Feature Ablation
+
+### Goal
+
+Determine whether the EXP-M042 improvement depends primarily on brittle question-template features or survives with more general NLI-derived signals.
+
+### Results
+
+#### NLI only
+
+* accuracy: 0.8667
+* mean scored tIoU: 0.4575
+* composite: 0.6212
+
+#### NLI + semantic surface features
+
+Features additionally included question length, explicit number/unit presence, and negation.
+
+* accuracy: 0.8744
+* mean scored tIoU: 0.4592
+* composite: 0.6252
+
+#### Full EXP-M042
+
+Also included question auxiliary-form indicators.
+
+* accuracy: 0.8744
+* mean scored tIoU: 0.4665
+* composite: 0.6297
+
+### Reference
+
+EXP-M037:
+
+* accuracy: 0.8821
+* mean scored tIoU: 0.4436
+* composite: 0.6190
+
+### Interpretation
+
+The EXP-M042 improvement is not entirely attributable to question-template features.
+
+NLI-only meta-classification already slightly exceeds the previous system, and adding general surface features increases the gain further.
+
+Auxiliary-form indicators provide an additional approximately +0.0044 composite, so some dependence on dataset question structure remains, but they are not the sole source of the improvement.
+
+### Decision
+
+KEEP full EXP-M042 as the current best development classifier.
+
+Next: improve threshold calibration robustness using nested conversation-disjoint cross-validation.
+
+---
+
+## EXP-M044 — Nested Threshold Calibration
+
+### Goal
+
+Test whether nested conversation-disjoint threshold calibration improves robustness of the meta-classifier and reduces threshold overfitting.
+
+### Method
+
+Outer 5-fold GroupKFold by conversation.
+
+Within each outer training partition:
+
+* inner 4-fold GroupKFold
+* generate inner OOF probabilities
+* optimize the decision threshold against the competition composite objective
+* retrain the classifier on all outer-training conversations
+* apply the calibrated threshold to the outer held-out fold
+
+This experiment used NLI-only inference features.
+
+### Results
+
+* accuracy: 0.8487
+* mean scored tIoU: 0.4619
+* composite: 0.6166
+* TP / FN: 178 / 17
+* TN / FP: 153 / 42
+
+Fold-calibrated thresholds:
+
+* 0.2487
+* 0.2595
+* 0.3569
+* 0.2215
+* 0.3690
+
+### References
+
+EXP-M037:
+
+* composite: 0.6190
+
+EXP-M043 NLI-only:
+
+* composite: 0.6212
+
+EXP-M042 full:
+
+* composite: 0.6297
+
+### Interpretation
+
+Nested calibration slightly improved positive recall but substantially increased false positives.
+
+The loss in accuracy outweighed the evidence benefit.
+
+### Decision
+
+**DISCARD.**
+
+Retain EXP-M042 full HGB as the stronger meta-classifier.
+
+---
+
+## EXP-M045 — M042 Differential Error Analysis
+
+### Goal
+
+Understand exactly how M042 differs from the previous M018 classifier and determine whether its additional errors can be corrected systematically.
+
+### Comparison
+
+M018 errors:
+
+* 46
+
+M042 errors:
+
+* 49
+
+Among M018/M042 disagreements:
+
+* M042 fixed M018 errors: 8
+* M042 introduced new errors: 11
+* wrong in both systems: 38
+
+The systems disagreed on only 19 of 390 questions.
+
+### Key Pattern
+
+Most useful M042 changes were:
+
+* M018 = NO
+* M042 = YES
+* gold = YES
+
+Most harmful M042 changes were also:
+
+* M018 = NO
+* M042 = YES
+* gold = NO
+
+Therefore M042's main benefit and main failure mode were both concentrated in the same type of override.
+
+Examples of useful M042 rescues included:
+
+* Ibumetin prescription issued
+* continued monitoring
+* fasting blood sugar of 7.0 mmol/L
+* HbA1c of 43 mmol/mol
+* no reaction after injection
+* cholesterol level requested
+
+Examples of harmful M042 overrides included:
+
+* off-topic pet/device questions
+* hospital admission
+* insulin initiation
+* wounds on feet
+* severe obesity
+* antibiotic treatment
+
+### Interpretation
+
+M042 improved positive recall, but its additional YES predictions were not uniformly trustworthy.
+
+Simple rules based on M042 probability or original NLI margin did not clearly separate useful from harmful overrides.
+
+### Decision
+
+**KEEP M042, but investigate disagreement-specific evidence confidence rather than applying hand-written correction rules.**
+
+---
+
+## EXP-M046 — Evidence-Aware Positive Disagreement Audit
+
+### Goal
+
+Test whether the final evidence ranker provides an independent signal for deciding whether M042 should override M018.
+
+### Scope
+
+At this stage, final OOF evidence spans were available only for the 195 gold-positive questions.
+
+This allowed analysis of:
+
+* 8 useful M042 overrides
+* 1 harmful positive-direction change
+
+### Results
+
+For M042 changes that fixed M018:
+
+* mean evidence-ranker score: 0.7328
+* mean evidence-NLI entailment: 0.2202
+* mean evidence-NLI contradiction: 0.1697
+* mean evidence-NLI ratio: 0.4516
+* mean evidence gold tIoU: 0.5585
+
+For the one harmful positive change:
+
+* evidence-ranker score: 0.4069
+* evidence-NLI entailment: 0.0013
+* evidence-NLI contradiction: 0.9761
+* evidence-NLI ratio: 0.0014
+* evidence gold tIoU: 0.0000
+
+### Interpretation
+
+The final evidence-ranker confidence appeared much more useful than the classifier's internal NLI segment scores.
+
+However, the harmful comparison group contained only one positive example, so no gating rule could yet be considered reliable.
+
+### Decision
+
+**KEEP as supporting analysis.**
+
+Next step: generate inference-realistic evidence spans for all 390 questions.
+
+---
+
+## EXP-M047 — All-Question Hybrid OOF Evidence Ranker
+
+### Goal
+
+Extend the M036 hybrid evidence ranker to all 390 questions so that evidence confidence can be analyzed for both positive and negative classifier disagreements.
+
+### Method
+
+Candidate types:
+
+* sentence_1
+* sentence_2
+* sentence_3
+* word_6
+* word_10
+
+Training supervision:
+
+* positive questions only
+
+Held-out scoring:
+
+* all positive questions
+* all hard negatives
+* all off-topic questions
+
+Five-fold GroupKFold by conversation was preserved.
+
+### Coverage
+
+* all questions: 390
+* positive: 195
+* hard_negative: 142
+* off_topic: 53
+
+### Positive Localization
+
+* mean tIoU: 0.5158
+* median tIoU: 0.5673
+* any overlap: 0.7641
+* tIoU >= 0.25: 0.7077
+* tIoU >= 0.50: 0.5744
+* tIoU >= 0.75: 0.3641
+
+Candidate oracle:
+
+* mean tIoU: 0.8447
+
+Runtime:
+
+* wall time: 537.9 s
+
+### Reference
+
+M036 positive-only evidence:
+
+* mean tIoU: 0.5144
+
+### Interpretation
+
+The all-question version preserved evidence quality and slightly improved positive localization.
+
+More importantly, it produced an inference-realistic selected evidence span and ranker confidence for every one of the 390 questions.
+
+### Decision
+
+**KEEP.**
+
+M047 becomes the evidence source for disagreement arbitration analysis.
+
+---
+
+## EXP-M048 — All-Disagreement Evidence Audit
+
+### Goal
+
+Analyze all 19 M018/M042 disagreements using the M047 final evidence span and evidence confidence.
+
+### Disagreement Structure
+
+* total disagreements: 19
+* M042 useful changes: 8
+* M042 harmful changes: 11
+
+Direction:
+
+* NO → YES: 18
+* YES → NO: 1
+
+### Group Means
+
+#### M042 fixed M018
+
+* M042 probability: 0.5299
+* M042 margin above threshold: 0.1529
+* max segment ratio: 0.3948
+* max segment entailment: 0.0647
+* max segment margin: -0.000934
+* evidence-ranker score: **0.7001**
+* evidence-NLI entailment: 0.2165
+* evidence-NLI contradiction: 0.1964
+* evidence-NLI ratio: 0.4257
+
+#### M042 broke M018
+
+* M042 probability: 0.4938
+* M042 margin above threshold: 0.1192
+* max segment ratio: 0.4369
+* max segment entailment: 0.0028
+* max segment margin: -0.000920
+* evidence-ranker score: **0.2342**
+* evidence-NLI entailment: 0.0012
+* evidence-NLI contradiction: 0.1021
+* evidence-NLI ratio: 0.1336
+
+### Separation
+
+Evidence-ranker score:
+
+* useful range: 0.3888–0.9559
+* harmful range: 0.0511–0.5681
+* useful mean: 0.7001
+* harmful mean: 0.2342
+
+Original max-segment NLI margin showed essentially no separation:
+
+* useful mean: -0.000934
+* harmful mean: -0.000920
+
+### Interpretation
+
+The final evidence ranker's confidence was substantially more informative for arbitration than the original classification NLI signals.
+
+A large fraction of harmful M042 YES overrides had weak evidence-ranker confidence.
+
+### Decision
+
+**KEEP.**
+
+Proceed to a conversation-disjoint evidence-confidence gate between M018 and M042.
+
+---
+
+## EXP-M049 — Evidence-Gated M018/M042 Arbitration
+
+### Hypothesis
+
+M042 improves positive recall but introduces additional false positives.
+
+Using M018 as the conservative base classifier and allowing M042 to override it only when final evidence confidence is sufficiently high may preserve M042's useful rescues while rejecting many harmful overrides.
+
+### Method
+
+For each question:
+
+1. Compute M018 prediction.
+2. Compute M042 prediction.
+3. If the classifiers agree, use the agreed prediction.
+4. If they disagree:
+
+   * use M042 when evidence-ranker confidence exceeds the fold-calibrated threshold
+   * otherwise retain M018.
+
+Thresholds were calibrated within each GroupKFold training partition.
+
+### Fold Results
+
+Fold 1:
+
+* threshold: 0.3398
+* test composite: 0.6208
+
+Fold 2:
+
+* threshold: 0.6215
+* test composite: 0.6948
+
+Fold 3:
+
+* threshold: 0.3693
+* test composite: 0.6347
+
+Fold 4:
+
+* threshold: 0.3693
+* test composite: 0.6469
+
+Fold 5:
+
+* threshold: 0.3693
+* test composite: 0.5684
+
+Thresholds:
+
+* 0.3398
+* 0.6215
+* 0.3693
+* 0.3693
+* 0.3693
+
+Mean threshold:
+
+* 0.4138
+
+Median / deployment candidate:
+
+* approximately 0.3693
+
+### OOF Result
+
+* accuracy: **0.8897**
+* mean scored tIoU: **0.4658**
+* composite: **0.6354**
+* TP / FN: 176 / 19
+* TN / FP: 171 / 24
+
+Disagreements:
+
+* total: 19
+* accepted M042 overrides: 9
+* rejected M042 overrides: 10
+
+### References
+
+EXP-M037 / M018:
+
+* composite: 0.6190
+
+EXP-M042:
+
+* composite: 0.6297
+
+EXP-M049:
+
+* composite: **0.6354**
+
+### Fixed-Threshold Deployment Diagnostic
+
+Using a single threshold of:
+
+`0.369304`
+
+produced:
+
+* accuracy: 0.8974
+* scored tIoU: 0.4732
+* composite: 0.6429
+* TP / FN: 178 / 17
+* TN / FP: 172 / 23
+* accepted M042 overrides: 10
+
+This result is **not an unbiased OOF estimate**, because the deployment threshold was selected after examining cross-validation behavior.
+
+The unbiased development estimate remains:
+
+* **M049 OOF composite: 0.6354**
+
+### Deployment Export
+
+Full-data models were trained and exported:
+
+* `medical/artifacts/models/meta_classifier_m042.joblib`
+* `medical/artifacts/models/hybrid_evidence_ranker_m049/`
+* `medical/artifacts/models/m049_deployment_metadata.json`
+
+Deployment thresholds:
+
+* M018 margin threshold: 0.000585
+* M042 probability threshold: 0.384878
+* M049 evidence gate: 0.369304
+
+### Endpoint Verification
+
+10-question smoke test:
+
+* structure: PASS
+* accuracy: 9/10
+* latency: 7.23 s
+
+Full 390-question local integration check:
+
+* accuracy: 0.910
+* mean tIoU: 0.695
+* score: 0.781
+* positive: 180/195
+* hard_negative: 124/142
+* off_topic: 51/53
+* failed conversations: 0
+* timeouts: 0
+* mean conversation latency: 7.02 s
+* worst conversation latency: 12.84 s
+
+The 0.781 local score is **not an unbiased generalization estimate**, because the deployment models were trained on the full 390-question development set.
+
+### Decision
+
+**KEEP — CURRENT BEST SYSTEM.**
+
+EXP-M049 becomes the deployment candidate.
+
+Use the conversation-disjoint OOF composite of **0.6354** as the primary development estimate, while treating the full-data local evaluation as an integration and runtime verification.

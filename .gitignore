@@ -25,21 +25,11 @@ venv/
 *.pem
 
 # Data
-data/raw/*
-data/interim/*
-data/processed/*
+data/
 
 # Challenge runtime outputs
-survival/logs/*
-survival/results/*
-
-!survival/logs/.gitkeep
-!survival/results/.gitkeep
-
-# Keep directory structure
-!data/raw/.gitkeep
-!data/interim/.gitkeep
-!data/processed/.gitkeep
+survival/logs/
+survival/results/
 
 # Models / checkpoints
 models/*

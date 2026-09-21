@@ -34,11 +34,10 @@ survival/       Challenge 3 — Survival Simulator source, server, and tuned pol
 experiments/    Dated experiment logs (EXP-Dxxx / EXP-Mxxx) for drone and medical
 scripts/        Environment check + start-up helpers (Windows/Mac)
 src/            Shared utilities (e.g. seeding)
-data/           Raw/interim/processed data (gitignored, structure only)
 requirements-lock.txt, requirements-windows-lock.txt   Pinned environments
 ```
 
-Generated/large artifacts (model weights, venvs, captures, `runs/`, `medical/artifacts`, `drone/artifacts`) are excluded via `.gitignore` and are not part of this repo.
+Generated/large artifacts (model weights, venvs, captures, `data/`, `runs/`, `medical/artifacts`, `drone/artifacts`, `survival/logs`, `survival/results`) are excluded via `.gitignore` and are not part of this repo.
 
 ## Setup
 

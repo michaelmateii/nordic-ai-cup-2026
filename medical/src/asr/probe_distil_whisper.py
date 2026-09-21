@@ -15,8 +15,11 @@ from transformers import (
 
 
 DEFAULT_AUDIO_DIR = Path(
-    r"C:\Users\Calle\Projects\Nordic-AI-Cup-2026-official"
-    r"\medical-appointment\data\audio"
+    Path(__file__).resolve().parents[3].parent
+    / "Nordic-AI-Cup-2026-official"
+    / "medical-appointment"
+    / "data"
+    / "audio"
 )
 
 MODEL_ID = "distil-whisper/distil-medium.en"

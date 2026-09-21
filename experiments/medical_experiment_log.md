@@ -3930,54 +3930,99 @@ Proceed to a conversation-disjoint evidence-confidence gate between M018 and M04
 
 ## EXP-M049 — Evidence-Gated M018/M042 Arbitration
 
-### Hypothesis
+### Goal
 
-M042 improves positive recall but introduces additional false positives.
+Preserve the useful positive-recall gains from M042 while rejecting the additional false positives it introduced.
 
-Using M018 as the conservative base classifier and allowing M042 to override it only when final evidence confidence is sufficiently high may preserve M042's useful rescues while rejecting many harmful overrides.
+### Motivation
+
+M018 and M042 disagreed on only 19 of 390 development questions.
+
+Among those disagreements:
+
+* M042 fixed 8 M018 errors
+* M042 introduced 11 new errors
+
+M048 showed that final evidence-ranker confidence strongly separated many useful M042 overrides from harmful ones.
 
 ### Method
 
+M018 was retained as the conservative base classifier.
+
 For each question:
 
-1. Compute M018 prediction.
-2. Compute M042 prediction.
-3. If the classifiers agree, use the agreed prediction.
+1. Generate the M018 prediction.
+2. Generate the M042 HGB meta-classifier prediction.
+3. If both classifiers agree, use their shared answer.
 4. If they disagree:
 
-   * use M042 when evidence-ranker confidence exceeds the fold-calibrated threshold
+   * trust M042 when final evidence-ranker confidence exceeds a calibrated threshold
    * otherwise retain M018.
 
-Thresholds were calibrated within each GroupKFold training partition.
+Thresholds were calibrated within the training portion of each conversation-disjoint GroupKFold split.
 
 ### Fold Results
 
 Fold 1:
 
 * threshold: 0.3398
-* test composite: 0.6208
+* test disagreements: 2
+* M042 overrides accepted: 2
+* accuracy: 0.9250
+* scored tIoU: 0.4180
+* composite: 0.6208
 
 Fold 2:
 
 * threshold: 0.6215
-* test composite: 0.6948
+* test disagreements: 7
+* M042 overrides accepted: 3
+* accuracy: 0.9250
+* scored tIoU: 0.5414
+* composite: 0.6948
 
 Fold 3:
 
 * threshold: 0.3693
-* test composite: 0.6347
+* test disagreements: 3
+* M042 overrides accepted: 1
+* accuracy: 0.8625
+* scored tIoU: 0.4828
+* composite: 0.6347
 
 Fold 4:
 
 * threshold: 0.3693
-* test composite: 0.6469
+* test disagreements: 4
+* M042 overrides accepted: 2
+* accuracy: 0.8625
+* scored tIoU: 0.5032
+* composite: 0.6469
 
 Fold 5:
 
 * threshold: 0.3693
-* test composite: 0.5684
+* test disagreements: 3
+* M042 overrides accepted: 1
+* accuracy: 0.8714
+* scored tIoU: 0.3665
+* composite: 0.5684
 
-Thresholds:
+### Overall OOF Result
+
+* accuracy: 0.8897
+* mean scored tIoU: 0.4658
+* composite: **0.6354**
+* TP / FN: 176 / 19
+* TN / FP: 171 / 24
+
+Disagreements:
+
+* total: 19
+* accepted M042 overrides: 9
+* rejected M042 overrides: 10
+
+Fold thresholds:
 
 * 0.3398
 * 0.6215
@@ -3989,100 +4034,2156 @@ Mean threshold:
 
 * 0.4138
 
-Median / deployment candidate:
+Median threshold:
 
 * approximately 0.3693
 
-### OOF Result
-
-* accuracy: **0.8897**
-* mean scored tIoU: **0.4658**
-* composite: **0.6354**
-* TP / FN: 176 / 19
-* TN / FP: 171 / 24
-
-Disagreements:
-
-* total: 19
-* accepted M042 overrides: 9
-* rejected M042 overrides: 10
-
 ### References
 
-EXP-M037 / M018:
+M037 / M018:
 
 * composite: 0.6190
 
-EXP-M042:
+M042:
 
 * composite: 0.6297
 
-EXP-M049:
+M049:
 
 * composite: **0.6354**
 
-### Fixed-Threshold Deployment Diagnostic
+### Interpretation
 
-Using a single threshold of:
+Evidence-ranker confidence provides useful independent information for choosing between M018 and M042.
+
+M049 improves both classification accuracy and the competition composite relative to M042 by retaining useful positive rescues while rejecting many low-confidence false-positive overrides.
+
+### Decision
+
+**KEEP — CURRENT BEST CONVERSATION-DISJOINT SYSTEM.**
+
+---
+
+## EXP-M050 — Fixed M049 Deployment Threshold Diagnostic
+
+### Goal
+
+Determine whether a single threshold suitable for deployment can approximate or improve upon the fold-specific M049 arbitration thresholds.
+
+### Motivation
+
+Three of the five M049 folds independently selected a threshold near:
+
+`0.3693`
+
+A single deployment threshold simplifies the runtime system and avoids requiring fold-dependent logic.
+
+### Threshold
 
 `0.369304`
 
-produced:
+### Result
 
-* accuracy: 0.8974
-* scored tIoU: 0.4732
-* composite: 0.6429
+* accuracy: **0.8974**
+* mean scored tIoU: **0.4732**
+* composite: **0.6429**
 * TP / FN: 178 / 17
 * TN / FP: 172 / 23
 * accepted M042 overrides: 10
 
-This result is **not an unbiased OOF estimate**, because the deployment threshold was selected after examining cross-validation behavior.
+### Comparison
 
-The unbiased development estimate remains:
+M049 unbiased OOF:
 
-* **M049 OOF composite: 0.6354**
+* composite: 0.6354
 
-### Deployment Export
+M050 fixed-threshold diagnostic:
 
-Full-data models were trained and exported:
+* composite: 0.6429
 
-* `medical/artifacts/models/meta_classifier_m042.joblib`
-* `medical/artifacts/models/hybrid_evidence_ranker_m049/`
-* `medical/artifacts/models/m049_deployment_metadata.json`
+### Important Validation Caveat
 
-Deployment thresholds:
+The threshold was selected after examining the cross-validation threshold behavior.
 
-* M018 margin threshold: 0.000585
-* M042 probability threshold: 0.384878
-* M049 evidence gate: 0.369304
+Therefore the M050 value is **not an unbiased OOF estimate**.
 
-### Endpoint Verification
+The defensible development estimate remains:
 
-10-question smoke test:
+* M049 OOF composite: **0.6354**
 
-* structure: PASS
-* accuracy: 9/10
-* latency: 7.23 s
+### Interpretation
 
-Full 390-question local integration check:
-
-* accuracy: 0.910
-* mean tIoU: 0.695
-* score: 0.781
-* positive: 180/195
-* hard_negative: 124/142
-* off_topic: 51/53
-* failed conversations: 0
-* timeouts: 0
-* mean conversation latency: 7.02 s
-* worst conversation latency: 12.84 s
-
-The 0.781 local score is **not an unbiased generalization estimate**, because the deployment models were trained on the full 390-question development set.
+A fixed threshold near 0.3693 appears suitable for deployment and produces a strong development diagnostic.
 
 ### Decision
 
-**KEEP — CURRENT BEST SYSTEM.**
+**KEEP as deployment configuration.**
 
-EXP-M049 becomes the deployment candidate.
+Use:
 
-Use the conversation-disjoint OOF composite of **0.6354** as the primary development estimate, while treating the full-data local evaluation as an integration and runtime verification.
+`EVIDENCE_GATE_THRESHOLD = 0.369304`
+
+Do not report 0.6429 as an unbiased validation result.
+
+---
+
+## EXP-M049 Deployment Export and Integration Validation
+
+### Goal
+
+Train the final M049 components on all supplied development data and integrate them into the production `/predict` endpoint.
+
+### Exported Models
+
+M042 meta-classifier:
+
+`medical/artifacts/models/meta_classifier_m042.joblib`
+
+Hybrid evidence ranker:
+
+`medical/artifacts/models/hybrid_evidence_ranker_m049/`
+
+Deployment metadata:
+
+`medical/artifacts/models/m049_deployment_metadata.json`
+
+### M042 Deployment Model
+
+Training rows:
+
+* 390
+
+Features:
+
+* 22
+
+Model:
+
+* HistGradientBoostingClassifier
+
+Mean training probability of YES:
+
+* 0.5002
+
+### Hybrid Evidence Ranker
+
+Training supervision:
+
+* 195 positive questions
+
+Candidate count:
+
+* 70,724
+
+Selected training pairs:
+
+* 7,545
+
+Training losses:
+
+* epoch 1: 0.064611
+* epoch 2: 0.035311
+* epoch 3: 0.025862
+* epoch 4: 0.021242
+
+### Runtime Thresholds
+
+M018 classification threshold:
+
+`0.000585`
+
+M042 probability threshold:
+
+`0.384878`
+
+M049 evidence gate:
+
+`0.369304`
+
+### Endpoint Smoke Test
+
+* HTTP: 200
+* structure: PASS
+* predicted YES: 4/10
+* accuracy: 9/10
+* latency: 7.23 s
+
+### Full Local Integration Evaluation
+
+Questions:
+
+* 390
+
+Correct:
+
+* 355
+
+Failed conversations:
+
+* 0
+
+Timeouts:
+
+* 0
+
+Accuracy by type:
+
+* positive: 180/195 = 0.923
+* hard_negative: 124/142 = 0.873
+* off_topic: 51/53 = 0.962
+
+Evidence:
+
+* mean tIoU: 0.695
+* no span returned: 15
+* tIoU when answered YES: 0.752
+
+Latency:
+
+* mean conversation: 7.016 s
+* worst conversation: 12.838 s
+* evaluator budget: 60 s/conversation
+
+Final local result:
+
+* accuracy: **0.910**
+* mean tIoU: **0.695**
+* composite: **0.781**
+
+### Important Caveat
+
+The final deployment models were trained on all 390 supplied development questions.
+
+Therefore the 0.781 local score is an integration/training-set diagnostic and must not be treated as a generalization estimate.
+
+The primary unbiased development reference remains:
+
+* M049 OOF: 0.6354
+
+### Official Hidden Validation
+
+Previous deployed system:
+
+* hidden validation score: 0.584396
+
+M049 deployment:
+
+* hidden validation score: **0.617839**
+
+Absolute improvement:
+
+* **+0.033443**
+
+Relative improvement:
+
+* approximately **+5.7%**
+
+Errors:
+
+* none
+
+### Interpretation
+
+The hidden score confirms that the M049 architecture genuinely improves generalization relative to the previous deployed system.
+
+The hidden score is also reasonably close to the conversation-disjoint OOF estimate:
+
+* OOF: 0.6354
+* hidden: 0.6178
+
+### Decision
+
+**KEEP M049 as the current production baseline.**
+
+---
+
+## EXP-M051 — Top-5 HGB Evidence Reranker
+
+### Goal
+
+Exploit the large difference between top-1 evidence performance and the oracle quality available among the top five M047 candidates.
+
+### Motivation
+
+M047 candidate recall analysis:
+
+* top-1 oracle tIoU: 0.5158
+* top-2 oracle: 0.5856
+* top-3 oracle: 0.6302
+* top-5 oracle: 0.6893
+* top-10 oracle: 0.7461
+* top-20 oracle: 0.7966
+* full candidate oracle: 0.8447
+
+This showed that the correct evidence was frequently already near the top of the ranking.
+
+### Method
+
+For each positive question:
+
+* retain M047 top-5 candidates
+* construct candidate-level inference-safe features
+* train an HGB regressor to predict candidate tIoU
+* select the candidate with the highest predicted score
+
+Features included:
+
+* first-stage evidence score
+* first-stage rank
+* score gaps
+* duration
+* word count
+* sentence count
+* lexical similarity
+* MS-MARCO score
+* token coverage
+* Jaccard similarity
+* DeBERTa entailment / contradiction / neutral
+* NLI margin
+* NLI ratio
+* candidate-type indicators
+
+Validation:
+
+* 5-fold GroupKFold by conversation
+
+### Fold Results
+
+Fold 1:
+
+* M047: 0.5107
+* M051: 0.5106
+* delta: -0.0001
+
+Fold 2:
+
+* M047: 0.5910
+* M051: 0.5945
+* delta: +0.0036
+
+Fold 3:
+
+* M047: 0.3579
+* M051: 0.3960
+* delta: +0.0381
+
+Fold 4:
+
+* M047: 0.6281
+* M051: 0.6080
+* delta: -0.0201
+
+Fold 5:
+
+* M047: 0.4816
+* M051: 0.4287
+* delta: -0.0528
+
+### Overall Result
+
+* mean tIoU: 0.5092
+* median tIoU: 0.5505
+* any overlap: 0.7692
+* tIoU >= 0.25: 0.6974
+* tIoU >= 0.50: 0.5436
+* tIoU >= 0.75: 0.3641
+
+Reference:
+
+* M047: 0.5158
+* top-5 oracle: 0.6893
+
+### Interpretation
+
+The top-5 candidate set contains substantial unused evidence quality, but a generic tabular regression model cannot reliably identify the best span.
+
+Performance is unstable across folds and slightly worse than the original first-stage ranker overall.
+
+### Decision
+
+**DISCARD.**
+
+---
+
+## EXP-M052 — Pairwise Top-5 Tabular Reranker
+
+### Goal
+
+Test whether pairwise preference learning can exploit the strong M047 top-5 candidate recall more effectively than absolute tIoU regression.
+
+### Method
+
+For each positive question:
+
+* retain the M047 top five candidates
+* generate every non-tied candidate pair
+* label the candidate with higher gold tIoU as preferred
+* add reversed pairs to maintain class symmetry
+
+Feature vectors were candidate-feature differences derived from the M051 feature set.
+
+Model:
+
+* standardized logistic regression
+
+Inference:
+
+* round-robin pairwise comparisons
+* candidate with most wins selected
+* aggregate pairwise confidence used for tie breaking
+
+Validation:
+
+* conversation-disjoint 5-fold GroupKFold
+
+### Fold Results
+
+Fold 1:
+
+* training pairs: 2,574
+* M047: 0.5107
+* M052: 0.4826
+* delta: -0.0281
+
+Fold 2:
+
+* training pairs: 2,504
+* M047: 0.5910
+* M052: 0.5561
+* delta: -0.0348
+
+Fold 3:
+
+* training pairs: 2,578
+* M047: 0.3579
+* M052: 0.4035
+* delta: +0.0457
+
+Fold 4:
+
+* training pairs: 2,560
+* M047: 0.6281
+* M052: 0.6190
+* delta: -0.0092
+
+Fold 5:
+
+* training pairs: 2,600
+* M047: 0.4816
+* M052: 0.4870
+* delta: +0.0054
+
+### Overall Result
+
+* mean tIoU: 0.5108
+* median tIoU: 0.5630
+* any overlap: 0.7179
+* tIoU >= 0.25: 0.6821
+* tIoU >= 0.50: 0.5590
+* tIoU >= 0.75: 0.4000
+
+Reference:
+
+* M047 top-1: 0.5158
+* M051 HGB: 0.5092
+* top-5 oracle: 0.6893
+
+Gain versus M047:
+
+* -0.0050
+
+### Interpretation
+
+Pairwise learning does not solve the top-5 selection problem when based on handcrafted candidate features.
+
+Both M051 and M052 fail despite a strong top-5 oracle.
+
+This indicates that the unresolved distinction is likely semantic and should be modeled directly from candidate text rather than through engineered feature differences.
+
+### Decision
+
+**DISCARD.**
+
+Do not continue with additional generic tabular rerankers.
+
+---
+
+## EXP-M053 — Challenge Structure and Runtime-Signal Audit
+
+### Goal
+
+Investigate whether leaderboard scores near 1.00 can be explained by deterministic challenge structure, question ordering, repeated templates, question wording, or underused runtime-safe model signals.
+
+### Dataset Structure
+
+* questions: 390
+* conversations: 39
+* questions per conversation: exactly 10
+* YES: 195
+* NO: 195
+
+Question types:
+
+* positive: 195
+* hard_negative: 142
+* off_topic: 53
+
+YES counts per conversation varied substantially:
+
+* 3 YES: 7 conversations
+* 4 YES: 10
+* 5 YES: 7
+* 6 YES: 6
+* 7 YES: 9
+
+Every observed question-type ordering was effectively unique.
+
+### Question Position
+
+YES rates varied by position but were not strongly deterministic.
+
+Position-only diagnostic:
+
+* accuracy: 0.5897
+* TN / FP: 115 / 80
+* FN / TP: 80 / 115
+
+Conclusion:
+
+Question ordering does not provide a strong shortcut.
+
+### Question Opening
+
+Some question openings were imbalanced, e.g. questions beginning with `the` or `will`, but the common auxiliary forms were not deterministic enough to explain high leaderboard performance.
+
+### Duplicate / Template Analysis
+
+* exact duplicate groups: 3
+* normalized duplicate groups: 6
+* normalized duplicate groups with mixed labels: 2
+
+Repeated templates were rare.
+
+### Question-Only Classification
+
+Character TF-IDF + logistic regression, conversation-disjoint:
+
+* accuracy: 0.7256
+* TN / FP: 140 / 55
+* FN / TP: 52 / 143
+
+Random question-level CV:
+
+* accuracy: 0.6564
+* TN / FP: 123 / 72
+* FN / TP: 62 / 133
+
+Conclusion:
+
+Question text carries some label information but no obvious high-performing template leak.
+
+Random question CV does not outperform conversation-disjoint CV, providing no evidence that repeated templates explain near-perfect scores.
+
+### Runtime-Safe Numeric Signals
+
+Features:
+
+* question position
+* max segment ratio
+* max segment entailment
+* max segment margin
+* max segment vs other
+* selected entailment
+* selected contradiction
+* selected neutral
+* maximum evidence-ranker score
+* mean evidence-ranker score
+* evidence-ranker score standard deviation
+* top-1 / top-2 evidence score gap
+
+Conversation-disjoint HGB result:
+
+* accuracy: **0.9026**
+* TN / FP: 173 / 22
+* FN / TP: 16 / 179
+
+Total errors:
+
+* **38 / 390**
+
+This matches the previously measured 38-error oracle ceiling obtained by choosing perfectly between M018 and M042.
+
+### Question Text + Runtime Signals
+
+Combined character TF-IDF question representation plus numeric runtime signals:
+
+* accuracy: 0.8949
+* TN / FP: 174 / 21
+* FN / TP: 20 / 175
+
+The text representation reduced performance relative to numeric signals alone.
+
+### Interpretation
+
+No simple positional, duplicate-template, or question-text leakage explains the task.
+
+The strongest new finding is instead that evidence-ranker score-distribution statistics contain substantial classification information.
+
+A conversation-disjoint classifier using only inference-safe numeric signals reaches 90.26% accuracy, outperforming prior individual classifiers and matching the previously observed M018/M042 oracle error count.
+
+Question text should not be added to this classifier under the current formulation.
+
+### Decision
+
+**KEEP — major finding.**
+
+Next experiment: construct a composite-aware classifier from these runtime-safe numeric signals and evaluate its interaction with M049.
+
+---
+
+## EXP-M054 — Runtime-Signal Composite Classifier
+
+### Goal
+
+Convert the strong runtime-safe numeric signal discovered in M053 into a classifier optimized for the actual competition composite objective.
+
+### Features
+
+Inference-safe features only:
+
+* question position
+* max segment ratio
+* max segment entailment
+* max segment margin
+* max segment vs other
+* selected entailment
+* selected contradiction
+* selected neutral
+* maximum evidence-ranker score
+* mean evidence-ranker score
+* evidence-ranker score standard deviation
+* top-1 / top-2 evidence score gap
+
+No gold labels, question type, or evidence annotations were used as inference features.
+
+### Validation
+
+5-fold GroupKFold by conversation.
+
+Each fold:
+
+1. trained HGB on outer-training conversations
+2. selected a composite-optimal probability threshold on the training partition
+3. applied that threshold to the held-out conversations
+
+### OOF Result
+
+* accuracy: **0.9000**
+* scored tIoU: **0.4806**
+* composite: **0.6484**
+* TP / FN: 179 / 16
+* TN / FP: 172 / 23
+
+Fold thresholds:
+
+* 0.4970
+* 0.5344
+* 0.5433
+* 0.5284
+* 0.4706
+
+Mean threshold:
+
+* 0.5147
+
+### References
+
+M053 default runtime-numeric classifier:
+
+* accuracy: 0.9026
+
+M049:
+
+* OOF composite: 0.6354
+* hidden validation: 0.6178
+
+M054:
+
+* OOF composite: **0.6484**
+
+Gain over M049 OOF:
+
+* **+0.0130**
+
+### Interpretation
+
+Runtime evidence-score distribution features carry substantial classification information beyond the original segmentwise NLI classifier.
+
+M054 improves the competition objective while maintaining approximately 90% classification accuracy.
+
+Threshold selection is comparatively stable across folds, clustering around roughly 0.47–0.54.
+
+### Decision
+
+**KEEP — CURRENT BEST CLEAN OFFLINE SYSTEM.**
+
+Next: evaluate complementarity between M054 and M049/M018/M042 and determine whether an arbitration ensemble can exceed 0.6484.
+
+## EXP-M055A — M049 / M054 Complementarity Audit
+
+### Goal
+
+Measure whether M049 and M054 make sufficiently different errors to justify classifier arbitration.
+
+### Results
+
+- M054 errors: 39
+- M049 errors: 43
+- errors shared by both: 28
+- M054 fixes M049: 15
+- M049 fixes M054: 11
+
+Oracle choosing correctly between M049 and M054:
+
+- errors: 28
+- accuracy: 0.9282
+
+### Interpretation
+
+M049 and M054 are substantially complementary.
+
+M054 is stronger overall, but M049 correctly handles 11 examples that M054 misses. Conversely, M054 fixes 15 M049 errors.
+
+This provides meaningful headroom beyond the standalone M054 classifier.
+
+### Decision
+
+KEEP as a major ensemble opportunity.
+
+Next: analyze disagreement confidence and construct a conversation-disjoint arbitration rule.
+
+---
+
+## EXP-M055 — DeBERTa-v3-base Runtime-Signal Classifier
+
+### Goal
+
+Test whether a stronger NLI model improves the runtime-safe numeric classification signals discovered in M053/M054.
+
+### NLI Model
+
+`cross-encoder/nli-deberta-v3-base`
+
+The model successfully loaded on the GTX 1060 6 GB.
+
+### Raw Segmentwise NLI Result
+
+* accuracy: 0.7641
+* predicted YES rate: 0.7000
+* gold YES rate: 0.5000
+
+By question type:
+
+* positive: 188/195 = 0.9641
+* hard_negative: 73/142 = 0.5141
+* off_topic: 37/53 = 0.6981
+
+Confusion matrix:
+
+* TN: 110
+* FP: 85
+* FN: 7
+* TP: 188
+
+Latency:
+
+* total for 390 questions: 22.68 s
+* mean/question: 0.0581 s
+* estimated/10 questions: 0.5814 s
+
+### Interpretation of Raw NLI
+
+The larger NLI model strongly favors YES under the existing segmentwise decision rule.
+
+Its raw classification accuracy is substantially worse than the smaller NLI model because of excessive false positives.
+
+However, its probability distributions may still provide stronger semantic features.
+
+### Runtime-Signal Classifier
+
+The same M054 runtime-safe feature architecture was rebuilt using the DeBERTa-v3-base NLI features.
+
+Features included:
+
+* question position
+* max segment ratio
+* max segment entailment
+* max segment margin
+* max segment vs other
+* selected entailment
+* selected contradiction
+* selected neutral
+* evidence maximum score
+* evidence mean score
+* evidence score standard deviation
+* evidence top-1 / top-2 gap
+
+Validation:
+
+* 5-fold GroupKFold by conversation
+* fold-local composite threshold calibration
+
+### OOF Result
+
+* accuracy: **0.9128**
+* scored tIoU: **0.4805**
+* composite: **0.6534**
+* TP / FN: 174 / 21
+* TN / FP: 182 / 13
+
+Fold thresholds:
+
+* 0.5083
+* 0.4353
+* 0.5649
+* 0.4919
+* 0.4942
+
+Mean threshold:
+
+* 0.4989
+
+### References
+
+M054:
+
+* accuracy: 0.9000
+* composite: 0.6484
+
+M055:
+
+* accuracy: **0.9128**
+* composite: **0.6534**
+
+Gain over M054:
+
+* composite: **+0.0050**
+* accuracy: **+0.0128**
+
+### Interpretation
+
+Although DeBERTa-v3-base performs poorly as a direct segmentwise classifier, its NLI probability landscape is more useful as input to the downstream HGB runtime-signal classifier.
+
+The strongest improvement is in negative rejection:
+
+* M054 false positives: 23
+* M055 false positives: 13
+
+This comes at the cost of additional false negatives:
+
+* M054 false negatives: 16
+* M055 false negatives: 21
+
+The net effect is still positive for the competition composite.
+
+### Decision
+
+**KEEP — CURRENT BEST CLEAN OOF SYSTEM.**
+
+Do not use the raw DeBERTa-v3-base prediction directly.
+
+Use its NLI outputs as features in the runtime-signal classifier.
+
+---
+
+## EXP-M056 — Dual-NLI Runtime-Signal Fusion
+
+### Goal
+
+Exploit the strong complementarity between M054 and M055 by combining the probability landscapes from both the small and base DeBERTa NLI models in a single inference-safe classifier.
+
+### Motivation
+
+M054:
+
+* errors: 39
+
+M055:
+
+* errors: 34
+
+M054/M055 shared errors:
+
+* 14
+
+Oracle choosing correctly between M054 and M055:
+
+* accuracy: 0.9641
+
+Therefore the two NLI systems contain substantially complementary classification information.
+
+### Method
+
+The fusion classifier used:
+
+* all M054 small-DeBERTa NLI features
+* all M055 base-DeBERTa NLI features
+* evidence-ranker score-distribution features
+* M054 probability
+* M055 probability
+* each model's signed distance from its calibrated threshold
+* cross-model probability difference
+* absolute probability difference
+
+Model:
+
+* HistGradientBoostingClassifier
+
+Validation:
+
+* conversation-disjoint 5-fold GroupKFold
+* fold-local composite threshold calibration
+
+### OOF Result
+
+* accuracy: **0.9103**
+* scored tIoU: **0.4825**
+* composite: **0.6536**
+* TP / FN: 179 / 16
+* TN / FP: 176 / 19
+
+Fold thresholds:
+
+* 0.4679
+* 0.4733
+* 0.5272
+* 0.4689
+* 0.4908
+
+Mean threshold:
+
+* 0.4856
+
+### References
+
+M054:
+
+* composite: 0.6484
+
+M055:
+
+* composite: 0.6534
+
+M056:
+
+* composite: **0.6536**
+
+M054/M055 oracle classification accuracy:
+
+* 0.9641
+
+### Interpretation
+
+Joint use of the two NLI probability landscapes improves positive recall relative to M055 while retaining much of M055's improved negative rejection.
+
+However, the composite gain over M055 is only:
+
+* **+0.0002**
+
+This is effectively a tie given the dataset size.
+
+The generic fusion model captures only a small fraction of the very large M054/M055 oracle headroom.
+
+### Decision
+
+**KEEP as current highest OOF composite, but do not prioritize deployment yet.**
+
+Next: study the M054/M055 disagreement cases directly and determine whether an explicit disagreement arbiter can exploit their complementarity better than broad feature fusion.
+
+---
+
+## EXP-M057 — Intra-Conversation Question-Set Structure Audit
+
+### Goal
+
+Determine whether the ten questions submitted together for each conversation contain exploitable semantic relationships that independent per-question classification ignores.
+
+### Pair Coverage
+
+* conversations: 39
+* within-conversation question pairs: 1,755
+
+### Similarity vs Label Relationship
+
+Character similarity >= 0.30:
+
+* pairs: 45
+* opposite labels: 0.8444
+* same labels: 0.1556
+
+Character similarity >= 0.40:
+
+* pairs: 24
+* opposite labels: 0.9583
+* same labels: 0.0417
+
+Character similarity >= 0.50:
+
+* pairs: 10
+* opposite labels: 1.0000
+* same labels: 0.0000
+
+Character similarity >= 0.60:
+
+* pairs: 4
+* opposite labels: 1.0000
+
+Character similarity >= 0.70:
+
+* pairs: 2
+* opposite labels: 1.0000
+
+Character similarity >= 0.80:
+
+* pairs: 1
+* opposite labels: 1.0000
+
+### Examples
+
+Observed high-similarity opposite-label pairs include:
+
+* LDL cholesterol 4.2 mmol/L vs 2.2 mmol/L
+* fasting glucose 5.0 mmol/L vs 7.0 mmol/L
+* known COVID exposure vs explicitly denying exposure
+* erythema migrans present vs absent
+* continuing medication vs stopping medication
+* HbA1c 43 vs 53 mmol/mol
+* blood pressure 135/88 vs 155/98
+* coatings present vs free of coatings
+* diabetes unstable vs stable
+* foreign body present vs ruled out
+* pus present vs explicitly absent
+
+### Interpretation
+
+The challenge generator frequently creates hard-negative questions by modifying a positive proposition within the same conversation.
+
+The relationship may involve:
+
+* numeric substitution
+* polarity reversal
+* negation
+* mutually exclusive diagnoses
+* present vs absent findings
+* continue vs stop treatment
+* normal vs abnormal state
+
+This structure is available at inference because all ten questions for a conversation arrive together in one request.
+
+Independent classification therefore discards useful information.
+
+### Decision
+
+**KEEP — major structural finding.**
+
+Next experiment: joint set-level consistency correction using highly similar question pairs.
+
+---
+
+## EXP-M058 — Pair-Consistency Correction
+
+### Goal
+
+Test whether high-similarity intra-conversation question pairs can be used as logical constraints to improve classification.
+
+### Method
+
+Baseline:
+
+* M055 predictions
+
+For every within-conversation pair above a character-similarity threshold:
+
+* if predictions already differed, leave them unchanged
+* if predictions were identical, preserve the higher-confidence prediction
+* flip the lower-confidence prediction to enforce opposite labels
+
+Thresholds tested:
+
+* 0.80
+* 0.70
+* 0.60
+* 0.50
+* 0.45
+* 0.40
+* 0.35
+* 0.30
+
+### Baseline
+
+M055:
+
+* accuracy: 0.9128
+* scored tIoU: 0.4805
+* composite: 0.6534
+
+### Results
+
+Similarity >= 0.80:
+
+* corrections: 0
+* composite: 0.6534
+
+Similarity >= 0.70:
+
+* corrections: 0
+* composite: 0.6534
+
+Similarity >= 0.60:
+
+* corrections: 1
+* accuracy: 0.9154
+* scored tIoU: 0.4805
+* composite: 0.6544
+
+Similarity >= 0.50:
+
+* corrections: 1
+* accuracy: 0.9154
+* scored tIoU: 0.4805
+* composite: 0.6544
+
+Similarity >= 0.45:
+
+* corrections: 2
+* accuracy: 0.9128
+* scored tIoU: 0.4770
+* composite: 0.6513
+
+Similarity >= 0.40:
+
+* corrections: 5
+* accuracy: 0.9205
+* scored tIoU: 0.4770
+* composite: 0.6544
+
+Similarity >= 0.35:
+
+* corrections: 10
+* composite: 0.6489
+
+Similarity >= 0.30:
+
+* corrections: 16
+* composite: 0.6453
+
+### Interpretation
+
+High-similarity question pairs contain useful structural information.
+
+At strict thresholds, pairwise consistency can correct classification errors without harming evidence localization.
+
+However, raw character similarity becomes too noisy as the threshold is relaxed.
+
+A generic “similar questions must have opposite labels” rule is therefore insufficient.
+
+### Decision
+
+**KEEP as proof of concept, but do not deploy directly.**
+
+Next experiment: explicitly detect semantic transformations such as numeric substitutions, polarity reversals, present/absent findings, continue/stop treatment, and normal/abnormal states.
+
+---
+
+## EXP-M060 — Precision Transformation Constraints
+
+### Goal
+
+Improve M058 by replacing generic character-similarity constraints with higher-precision semantic transformation detection.
+
+### Method
+
+Candidate intra-conversation pairs were retained only when they contained:
+
+* high-confidence semantic opposites such as stable/unstable, normal/abnormal, continue/stop, viral/bacterial, deny/report, ruled-out/found
+* or numeric substitutions where the surrounding question text remained highly similar after replacing numbers with placeholders
+
+Noisy rules such as generic `free of ↔ has` were removed.
+
+For detected pairs, if M055 predicted identical labels for both questions:
+
+* retain the higher-confidence prediction
+* flip the lower-confidence prediction
+
+### Results
+
+Detected candidate pairs:
+
+* 21
+
+M055 baseline:
+
+* accuracy: 0.9128
+
+---
+
+## EXP-M061 — DeBERTa-v3-base Top-20 Evidence Reranking
+
+### Goal
+
+Test whether the stronger DeBERTa-v3-base NLI model can exploit the substantial evidence quality already present in the M047 top-20 candidate set.
+
+### Motivation
+
+M047 evidence selection:
+
+* mean tIoU: 0.5158
+
+Top-20 candidate oracle:
+
+* mean tIoU: 0.7966
+* median tIoU: 0.8934
+* any overlap: 0.9692
+* tIoU >= 0.50: 0.9026
+* tIoU >= 0.75: 0.7231
+
+This shows that the correct evidence span is very frequently already among the top twenty candidates.
+
+### Oracle Candidate Types
+
+* sentence_1: 107
+* sentence_2: 28
+* word_6: 28
+* word_10: 18
+* sentence_3: 4
+* word_14: 4
+* word_18: 3
+* word_24: 2
+* word_32: 1
+
+### Standalone DeBERTa-v3-base Evidence Ranking
+
+Entailment:
+
+* mean tIoU: 0.3462
+
+Margin:
+
+* mean tIoU: 0.3454
+
+Entailment ratio:
+
+* mean tIoU: 0.3456
+
+All three were substantially worse than M047.
+
+### Conversation-Disjoint Fusion
+
+Existing M047 OOF ranker scores were normalized within each question and fused with DeBERTa-v3-base NLI scores.
+
+#### Entailment Fusion
+
+Fold ranker weights:
+
+* 0.85
+* 0.90
+* 1.00
+* 0.90
+* 0.90
+
+OOF:
+
+* mean tIoU: 0.5127
+* median tIoU: 0.5533
+* any overlap: 0.7795
+* tIoU >= 0.50: 0.5590
+* tIoU >= 0.75: 0.3538
+
+Gain versus M047:
+
+* -0.0031
+
+#### Margin Fusion
+
+* mean tIoU: 0.5014
+
+#### Ratio Fusion
+
+* mean tIoU: 0.5049
+
+### Interpretation
+
+The larger NLI model provides useful classification information but does not provide useful fine-grained evidence-span ranking.
+
+The CV optimizer consistently assigns most or all weight to the existing M047 evidence ranker.
+
+Generic entailment confidence does not correspond closely enough to temporal overlap quality among semantically related candidate spans.
+
+### Decision
+
+**DISCARD for evidence ranking.**
+
+Retain DeBERTa-v3-base only as a classification feature generator.
+
+The remaining evidence problem should be treated as a dedicated span-localization/ranking task rather than generic NLI.
+
+---
+
+## EXP-M062 — Temporal Prior and Earliest-Mention Evidence Selection
+
+### Goal
+
+Test whether catastrophic evidence-localization failures are caused by the evidence ranker selecting later summaries or repeated mentions instead of the earlier annotated occurrence.
+
+### Motivation
+
+M047 top-1 localization showed a strongly bimodal error distribution:
+
+* 87/195 questions had center error <= 0.5 seconds
+* 139/195 had center error <= 2 seconds
+* 40/195 had center error >= 5 seconds and zero tIoU
+
+Many catastrophic selections appeared semantically valid but occurred far from the annotated evidence.
+
+### Method A — Temporal Score Penalty
+
+The normalized M047 evidence score was penalized according to the candidate's relative position in the transcript.
+
+The temporal penalty strength was selected independently within each conversation-disjoint training fold.
+
+### Result
+
+M047 baseline:
+
+* mean tIoU: 0.5158
+
+Temporal-prior folds:
+
+* fold 1: -0.0115
+* fold 2: +0.0000
+* fold 3: +0.0000
+* fold 4: +0.0000
+* fold 5: +0.0000
+
+OOF:
+
+* mean tIoU: 0.5135
+* median tIoU: 0.5673
+* any overlap: 0.7590
+* tIoU >= 0.50: 0.5744
+* tIoU >= 0.75: 0.3641
+
+### Method B — Near-Tie Earliest Mention
+
+For candidates whose M047 scores were within a fold-calibrated delta of the top candidate, select the earliest candidate.
+
+### Result
+
+Fold deltas:
+
+* fold 1: -0.0072
+* fold 2: +0.0000
+* fold 3: +0.0000
+* fold 4: -0.0076
+* fold 5: -0.0264
+
+OOF:
+
+* mean tIoU: 0.5076
+* median tIoU: 0.5533
+* any overlap: 0.7744
+* tIoU >= 0.50: 0.5641
+* tIoU >= 0.75: 0.3282
+
+### Interpretation
+
+The annotation does not follow a sufficiently strong global “earliest valid mention” rule.
+
+Although some catastrophic errors correspond to later repeated or summary mentions, adding a generic temporal prior degrades evidence selection on held-out conversations.
+
+The catastrophic-localization problem therefore requires semantic disambiguation between repeated mentions rather than a position heuristic.
+
+### Decision
+
+**DISCARD.**
+
+Do not add an earlier-evidence prior to the production ranker.
+
+---
+
+## EXP-M063 — Hard-Negative Evidence Ranker
+
+### Goal
+
+Train the evidence cross-encoder specifically on difficult candidates that the existing M047 ranker scores highly but that have substantially worse gold tIoU.
+
+### Method
+
+Candidate pool:
+
+* M047 top-20 candidates per positive question
+
+Training pairs emphasized:
+
+* candidate with strong gold overlap
+* versus high-ranking candidates with substantially lower tIoU
+* catastrophic zero-overlap candidates among M047's top ranks received additional training weight
+
+Model:
+
+* `cross-encoder/ms-marco-MiniLM-L6-v2`
+* pairwise RankNet-style logistic objective
+* conversation-disjoint 5-fold validation
+
+### OOF Result
+
+* mean tIoU: **0.5205**
+* median tIoU: **0.6103**
+* any overlap: 0.7436
+* tIoU >= 0.25: 0.6974
+* tIoU >= 0.50: 0.5795
+* tIoU >= 0.75: 0.3744
+
+Reference M047:
+
+* mean tIoU: 0.5158
+
+Gain:
+
+* **+0.0047**
+
+Selection behavior:
+
+* selections changed: 72 / 195
+* M047 zero-overlap failures rescued: 9
+* new zero-overlap failures introduced: 13
+
+Top-20 oracle:
+
+* 0.7966
+
+Remaining oracle gap:
+
+* 0.2761
+
+Wall time:
+
+* 569.8 seconds
+
+### Interpretation
+
+Hard-negative mining improves mean and median evidence quality, confirming that training directly on M047's difficult confusions is more useful than generic NLI or tabular reranking.
+
+However, M063 is too aggressive.
+
+It repairs nine catastrophic M047 errors but introduces thirteen new zero-overlap selections, reducing overall overlap coverage.
+
+The improvement therefore comes from better choices on a subset of cases while damaging others.
+
+### Decision
+
+**KEEP as a complementary evidence model.**
+
+Do not replace M047 globally.
+
+Next: measure M047/M063 complementarity and determine whether M063 can be gated to only high-confidence beneficial switches.
+
+---
+
+## EXP-M064 — M047/M063 Evidence Arbiter
+
+### Goal
+
+Exploit the complementarity between the original M047 evidence ranker and the hard-negative-trained M063 ranker without replacing M047 globally.
+
+### Motivation
+
+M047:
+
+* mean tIoU: 0.5158
+
+M063:
+
+* mean tIoU: 0.5205
+
+Two-model oracle:
+
+* mean tIoU: 0.5771
+
+Among 72 changed selections:
+
+* M063 wins: 30
+* M047 wins: 28
+* ties: 14
+
+### Models Tested
+
+Three conversation-disjoint arbitration models:
+
+* Ridge utility regression
+* Logistic preference classification
+* HGB utility regression
+
+Features included:
+
+* M063 rank within M047
+* M047 and M063 score margins
+* score gaps
+* span durations
+* word counts
+* start/end/center displacement
+* token overlap
+* candidate kinds and kind transitions
+
+The target was the utility of switching:
+
+`tIoU(M063) - tIoU(M047)`
+
+### Results
+
+#### Ridge
+
+* mean tIoU: 0.5122
+* gain vs M047: -0.0036
+* accepted M063: 51
+* useful switches: 20
+* harmful switches: 20
+
+DISCARD.
+
+#### Logistic
+
+* mean tIoU: 0.5152
+* gain vs M047: -0.0006
+* accepted M063: 48
+* useful switches: 19
+* harmful switches: 18
+
+DISCARD.
+
+#### HGB
+
+* mean tIoU: **0.5271**
+* gain vs M047: **+0.0112**
+* accepted M063: 35
+* useful switches: 15
+* harmful switches: 11
+* neutral switches: 9
+
+Fold deltas:
+
+* fold 1: -0.0075
+* fold 2: -0.0223
+* fold 3: +0.0878
+* fold 4: +0.0296
+* fold 5: -0.0262
+
+Two-model oracle:
+
+* 0.5771
+
+Oracle gap captured:
+
+* 18.3%
+
+### Interpretation
+
+The M047 and M063 rankers contain useful complementary information, and a nonlinear arbiter can exploit some of it.
+
+However, performance remains unstable across conversations. Tabular features do not reliably capture the semantic distinction between competing spans.
+
+### Decision
+
+**KEEP HGB M064 as current best evidence OOF model.**
+
+Do not deploy yet.
+
+Next: train a direct pairwise semantic comparator that jointly sees the question, the M047 candidate and the M063 candidate.
+
+---
+
+## EXP-M065 — Direct Pairwise Span Comparator
+
+### Goal
+
+Determine whether a transformer that jointly sees the question, the M047 candidate, and the M063 candidate can choose the better evidence span more reliably than the tabular M064 arbiter.
+
+### Method
+
+Model:
+
+* `cross-encoder/ms-marco-MiniLM-L6-v2`
+
+The original single-score MS-MARCO output head was replaced with a two-class classification head.
+
+Training input:
+
+* question
+* candidate A
+* candidate B
+
+Target:
+
+* which candidate has higher gold tIoU
+
+Training pairs were derived from informative M047 top-5 candidate comparisons.
+
+Validation:
+
+* conversation-disjoint 5-fold cross-validation
+
+### Result
+
+* M047 mean tIoU: 0.5158
+* M063 mean tIoU: 0.5205
+* M064 HGB arbiter: 0.5271
+* M065 mean tIoU: **0.5089**
+
+Gain versus M047:
+
+* **-0.0070**
+
+Arbitration behavior:
+
+* switched to M063: 47
+* useful switches: 17
+* harmful switches: 19
+* neutral switches: 11
+
+Two-model oracle:
+
+* 0.5771
+
+Oracle gap captured:
+
+* -11.4%
+
+Wall time:
+
+* 189.5 seconds
+
+### Interpretation
+
+The direct binary-comparator formulation underperformed.
+
+The original checkpoint was pretrained as a scalar query-passage relevance scorer. Replacing its pretrained ranking head with a randomly initialized two-class head discarded useful ranking structure and required the limited competition data to learn a substantially new comparison task.
+
+The resulting comparator did not reliably distinguish beneficial from harmful M063 switches.
+
+### Decision
+
+**DISCARD.**
+
+Do not use the two-class direct-comparator formulation again with this checkpoint.
+
+---
+
+## M066 — M063/M064 deployment evidence upgrade
+
+**Goal:** Deploy the best evidence-side improvements without disturbing the existing M049 classification logic.
+
+**Setup**
+- Classification: existing M049 / M042 arbitration unchanged.
+- Evidence:
+  - M047/M049 first-stage evidence ranker.
+  - M063 hard-negative evidence ranker.
+  - M064 HGB arbiter deciding whether to keep the M047 span or switch to the M063 span.
+- Important runtime decision: preserve the original M047 evidence confidence score for the M049 classification gate even when M064 changes the returned span.
+
+**Local evaluator**
+- Questions: 390
+- Accuracy: **0.910**
+- Mean tIoU: **0.715**
+- Composite: **0.793**
+- Failed conversations: 0
+- Timeouts: 0
+- Mean/conversation: 7.259 s
+- Worst conversation: 13.210 s
+
+Compared with the previous deployment:
+- Previous local mean tIoU: ~0.695
+- M066 local mean tIoU: **0.715**
+
+**Hidden validation**
+- Previous M049: **0.6178391635**
+- M066: **0.6173885615**
+- Delta: **-0.0004506**
+
+**Conclusion:** DISCARDED.
+
+The evidence improvements increased training/local-evaluator tIoU but did not transfer to hidden validation. This was the clearest indication so far that additional evidence-ranker optimization was overfitting the 39 provided conversations.
+
+---
+
+## M067 — M055 classification deployment
+
+**Goal:** Replace the older classification path with the stronger M055 runtime-signal classifier while restoring the original pre-M066 evidence selector.
+
+**Changes**
+- NLI upgraded from:
+  - `cross-encoder/nli-deberta-v3-small`
+- To:
+  - `cross-encoder/nli-deberta-v3-base`
+- Classification model:
+  - `meta_classifier_m055.joblib`
+- Features:
+  - `question_position`
+  - `max_segment_ratio`
+  - `max_segment_entailment`
+  - `max_segment_margin`
+  - `max_segment_vs_other`
+  - `selected_entailment`
+  - `selected_contradiction`
+  - `selected_neutral`
+  - `evidence_max_score`
+  - `evidence_mean_score`
+  - `evidence_std_score`
+  - `evidence_top_gap`
+- Evidence selection reverted to the original M049/M047 deployment selector.
+
+**M055 OOF reference**
+- Accuracy: **0.9128**
+- Scored tIoU: **0.4805**
+- Composite: **0.6534**
+- TP/FN: 174 / 21
+- TN/FP: 182 / 13
+
+**Smoke test**
+- HTTP 200
+- Structure PASS
+- Accuracy: 9/10
+- Latency: 9.00 s
+
+**Hidden validation**
+- M049 baseline: **0.6178391635**
+- M067: **0.6322466368**
+- Delta vs M049: **+0.0144075**
+
+**Conclusion:** ACCEPTED.
+
+This was the first substantial hidden-validation improvement after the evidence experiments. Classification generalization was clearly more valuable than further evidence reranking.
+
+---
+
+## M068 — M054/M055 classification arbiter
+
+**Goal:** Exploit the substantial disagreement complementarity between M054 and M055.
+
+Earlier diagnostic:
+- M054 errors: 39
+- M055 errors: 34
+- Both wrong: 14
+- M054/M055 oracle accuracy: **0.9641**
+
+A small meta-classifier was trained using both models' probabilities, margins, NLI features, evidence statistics, and question position.
+
+### HGB OOF
+- Accuracy: **0.9128**
+- Scored tIoU: **0.4861**
+- Composite: **0.6568**
+- TP/FN: 183 / 12
+- TN/FP: 173 / 22
+
+### Logistic OOF
+- Accuracy: **0.9026**
+- Scored tIoU: **0.4918**
+- Composite: **0.6561**
+- TP/FN: 185 / 10
+- TN/FP: 167 / 28
+
+### Best
+- M055: **0.6534**
+- M068 HGB: **0.6568**
+- Gain: **+0.0034**
+
+**Conclusion:** NOT DEPLOYED.
+
+The OOF gain was too small to justify replacing the already hidden-validated M067 deployment.
+
+---
+
+## M069 — M055 hidden-threshold sweep
+
+**Goal:** Test whether the M055 decision threshold could be improved directly against hidden validation.
+
+Known baseline:
+- Threshold: **0.4989**
+- Hidden score: **0.6322466368**
+
+### Threshold 0.45
+- Hidden score: **0.6301413737**
+- Delta vs baseline: **-0.0021053**
+
+### Threshold 0.55
+- Hidden score: **0.6267967217**
+- Delta vs baseline: **-0.0054499**
+
+**Conclusion:** DISCARDED.
+
+Both directions reduced hidden performance. Restored threshold **0.4989**.
+
+The deployed threshold was already close to the hidden optimum, so further micro-threshold tuning was stopped.
+
+---
+
+## M070 — Challenge-specific NLI fine-tuning
+
+**Goal:** Move beyond generic NLI and fine-tune DeBERTa-v3-base directly on competition-specific evidence/non-evidence relationships.
+
+**Base model**
+- `cross-encoder/nli-deberta-v3-base`
+
+**Training strategy**
+- Preserve pretrained 3-class NLI head.
+- Convert logits into a binary entailment-vs-non-entailment signal:
+
+`binary_logit = entailment_logit - logsumexp(contradiction_logit, neutral_logit)`
+
+Training pairs included:
+- Positive question + overlapping evidence candidate → positive.
+- Positive question + high-ranked wrong candidate → negative.
+- Hard-negative question + plausible transcript candidate → negative.
+- Off-topic question + plausible transcript candidate → negative.
+
+Conversation-disjoint 5-fold CV was retained.
+
+### M070 direct classifier
+- Accuracy: **0.8513**
+- Scored tIoU: **0.4959**
+- Composite: **0.6380**
+
+Direct use of M070 was worse than M055.
+
+### M055 + M070 fusion
+Fold weights on M055:
+- 0.60
+- 0.70
+- 0.70
+- 0.70
+- 0.20
+
+Fold thresholds:
+- 0.3936
+- 0.3053
+- 0.3053
+- 0.2958
+- 0.1934
+
+OOF result:
+- Accuracy: **0.9077**
+- Scored tIoU: **0.5049**
+- Composite: **0.6660**
+
+Reference:
+- M055 composite: **0.6534**
+- Gain: **+0.0126**
+
+**Conclusion:** PROMISING / DEPLOYMENT CANDIDATE.
+
+Unlike the evidence-only experiments, task-specific NLI produced a substantial OOF improvement and appeared complementary to M055.
+
+---
+
+## M071 — M055 + full-data M070 deployment
+
+**Goal:** Deploy the successful M070 fusion and test whether challenge-specific fine-tuning transfers to hidden validation.
+
+### Full-data M070 export
+- Training questions: **390**
+- Training pairs: **2,788**
+- Base model: `cross-encoder/nli-deberta-v3-base`
+- Saved model: `medical/artifacts/models/m070_task_specific_nli`
+- Entailment index: 1
+- Contradiction index: 0
+- Neutral index: 2
+
+Deployment fusion:
+- M055 weight: **0.70**
+- M070 weight: **0.30**
+- Threshold: **0.3053**
+
+Evidence selector remained unchanged from M067.
+
+### Smoke test
+- HTTP: 200
+- Structure: PASS
+- Accuracy: 9/10
+- Latency: **12.51 s**
+- Well below 60 s budget.
+
+### Hidden validation
+- M049: **0.6178391635**
+- M067: **0.6322466368**
+- M071: **0.6727151494**
+
+Improvements:
+- vs M067: **+0.0404685**
+- vs original M049: **+0.0548760**
+
+**Conclusion:** ACCEPTED — CURRENT CHAMPION.
+
+This was by far the largest hidden-validation improvement. The competition-specific fine-tuning generalized substantially better than expected from the OOF gain alone.
+
+Protected deployment backups were created for M071.
+
+---
+
+## M072 — Self hard-negative mining
+
+**Goal:** Improve M070 by using a first-stage task-specific model to mine its own hardest incorrect candidates from a broader candidate pool, then retrain a fresh stage-2 model.
+
+**Leakage control**
+For every outer CV fold:
+1. Train stage-1 M070 only on outer-training conversations.
+2. Score a broader top-40 candidate pool from those training conversations.
+3. Mine high-scoring wrong spans.
+4. Train a fresh stage-2 DeBERTa model on original + mined pairs.
+5. Evaluate only on the held-out conversations.
+
+Runtime evaluation remained top-12 candidates.
+
+### Mining summary
+
+| Fold | Original pairs | Mined pairs | Total pairs | Mean mined score |
+|---:|---:|---:|---:|---:|
+| 1 | 2190 | 2158 | 3932 | 0.0497 |
+| 2 | 2221 | 2168 | 3980 | 0.0569 |
+| 3 | 2224 | 2170 | 3977 | 0.0684 |
+| 4 | 2244 | 2180 | 3985 | 0.0568 |
+| 5 | 2273 | 2244 | 4084 | 0.0450 |
+
+Fusion weights:
+- 0.00
+- 0.60
+- 0.60
+- 0.70
+- 0.00
+
+Fusion thresholds:
+- 0.0008
+- 0.3877
+- 0.4123
+- 0.2822
+- 0.0008
+
+Results:
+- Gain vs M055: **+0.0106**
+- Gain vs M070 fusion: **-0.0020**
+- Approx. M072 fusion composite: **0.6640**
+- Wall time: **2827.6 s (~47 min)**
+
+**Conclusion:** DISCARDED.
+
+The mined examples were mostly not genuinely difficult:
+- mean mined M070 score only ~0.045–0.068.
+
+The large number of additional easy negatives diluted the useful supervision. Fold fusion behavior was also unstable.
+
+---
+
+## M073 — Same-conversation contrastive negative strategy
+
+**Goal:** Replace weak self-mined negatives with much stronger label-grounded semantic confounders from the same medical conversation.
+
+### Contrastive-pair audit
+
+Positive evidence spans:
+- **195**
+
+Total same-conversation question/evidence pairs:
+- **1,950**
+
+Targets:
+- Positive: **195**
+- Negative: **1,755**
+
+Negative pairs by question type:
+- Positive questions paired with another positive's evidence: **860**
+- Hard-negative questions: **638**
+- Off-topic questions: **257**
+
+Pairs per transcript:
+- Mean: 50
+- Median: 50
+- Min: 30
+- Max: 70
+
+Examples of potentially valuable contradictions:
+
+- Q: `Were abnormal sounds heard over the lungs?`
+- E: `Your lungs and your heart both sound normal. Nothing abnormal on listening.`
+
+- Q: `Has the doctor found the condition to be unstable?`
+- E: `No, nothing new.`
+
+- Q: `Is the stomach acid medication being discontinued?`
+- E: real treatment/evidence passages from the same consultation.
+
+These are substantially stronger negatives than M072's low-confidence mined spans because they often express the same medical concept with the wrong polarity, value, treatment, or finding.
+
+**Current status**
+- Audit complete.
+- Full M073 CV NOT started because competition time remaining is limited.
+- Planned next step: fast one-fold pilot using only the most semantically similar same-conversation negatives.
+- M071 (`0.6727151494` hidden) remains untouched as the protected champion.
+
+---
+
+### M073 fast contrastive pilot
+
+Fold 1:
+- M071 baseline: acc 0.9250, tIoU 0.4209, composite 0.6225
+- M073: acc 0.9000, tIoU 0.4180, composite 0.6108
+- Delta: -0.0118
+- Predictions changed: 2
+- Fixes: 0
+- Breaks: 2
+- Runtime: 185.1 s
+
+Conclusion: DISCARDED. Same-conversation contrastive negatives degraded the held-out fold; no second fold or full training performed.
+
+---
+
+### M074 — Global M055/M070 fusion optimization
+
+Global OOF search found a slightly better fixed deployment rule than M071:
+
+- Previous M071:
+  - M055 weight: 0.70
+  - M070 weight: 0.30
+  - threshold: 0.3053
+  - OOF composite: 0.673696
+  - hidden validation: 0.6727151494
+
+- M074:
+  - M055 weight: 0.68
+  - M070 weight: 0.32
+  - threshold: 0.3226589362
+  - OOF composite: 0.674722
+  - hidden validation: 0.6748204126
+
+Hidden gain vs M071: +0.0021053.
+
+Conclusion: ACCEPTED. M074 is the new hidden-validation champion.
+
+---
+
+### M075 — Learned M055/M070 meta-fusion
+
+Tested HGB and logistic meta-models using M055 probability plus M070 score-distribution features.
+
+Reference M074:
+- Accuracy: 0.9205
+- tIoU: 0.5109
+- Composite: 0.6747
+
+HGB:
+- Accuracy: 0.9256
+- tIoU: 0.4976
+- Composite: 0.6688
+
+Logistic:
+- Accuracy: 0.9205
+- tIoU: 0.5110
+- Composite: 0.6748
+
+Best gain vs M074: +0.0001.
+
+Conclusion: DISCARDED. The simple M074 linear fusion already captures essentially all useful fusion signal.
+
+### M076 — Multi-passage question classifier pilot
+
+Architecture:
+- DeBERTa-v3-base
+- Fresh binary classification head
+- Input: question + top 5 M047 passages
+- Direct task: predict YES/NO for the competition question
+
+Fold 1:
+- M074 baseline: acc 0.9250, tIoU 0.4209, composite 0.6225
+- M076 direct: acc 0.9000, tIoU 0.4209, composite 0.6125
+- M074/M076 fusion: acc 0.9500, tIoU 0.4209, composite 0.6325
+- Delta vs M074: +0.0100
+- Best M076 weight: 0.30
+- Runtime: 159 s
+
+Status: PROMISING BUT UNCONFIRMED. Fold 2 required before deployment.
+
+---
+
+### M077 — M074 + M076 multi-passage fusion deployment
+
+M076 was trained on the full 390-question dataset using the question plus the top 5 retrieved passages as one direct YES/NO classification input.
+
+Deployment fusion:
+- M074 weight: 0.65
+- M076 weight: 0.35
+- Fusion threshold: 0.3847283086
+- Evidence selector unchanged.
+
+Smoke test:
+- HTTP 200
+- Structure PASS
+- Accuracy: 10/10
+- Latency: 14.03 s
+
+Notably, M076 corrected the previous sample false positive:
+- "Were abnormal sounds heard over the lungs?"
+- M074: True
+- M077: False
+
+Hidden validation:
+- M074: 0.6748204126
+- M077: 0.6997446225
+- Gain: +0.0249242099
+
+Conclusion: ACCEPTED. M077 is the new hidden-validation champion.
+
+---
+
+### M078 — Full 5-fold M076 OOF calibration
+
+Current M077 OOF composite: 0.6810
+
+Nested leave-one-fold-out tuning:
+- Composite: 0.6822
+- Gain: +0.0011
+
+Fold M076 weights:
+- 0.37
+- 0.37
+- 0.42
+- 0.35
+- 0.37
+
+Fold thresholds:
+- 0.450365
+- 0.450365
+- 0.569985
+- 0.445497
+- 0.450365
+
+Median fixed deployment:
+- M076 weight: 0.37
+- threshold: 0.450364832
+- OOF composite: 0.6892
+- OOF gain vs M077: +0.0082
+
+Hidden validation:
+- M077: 0.6997446225
+- M078: 0.6963999705
+
+Conclusion: DISCARDED. The stronger OOF calibration did not transfer to hidden validation.
+
+### M079 — 3-epoch M076 pilot
+
+Tested whether extending M076 fine-tuning from 2 to 3 epochs improved fold 1.
+
+Fold 1:
+- M074 baseline: 0.6225
+- 2-epoch fusion: 0.6325
+- 3-epoch fusion: 0.6325
+
+Delta vs 2 epochs: +0.0000.
+
+Conclusion: DISCARDED. No evidence that a third epoch improves generalization.

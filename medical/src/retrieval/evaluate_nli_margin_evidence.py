@@ -6,8 +6,11 @@ import pandas as pd
 
 
 QUESTIONS = Path(
-    r"C:\Users\Calle\Projects\Nordic-AI-Cup-2026-official"
-    r"\medical-appointment\data\question_train.csv"
+    Path(__file__).resolve().parents[3].parent
+    / "Nordic-AI-Cup-2026-official"
+    / "medical-appointment"
+    / "data"
+    / "question_train.csv"
 )
 
 NLI_RESULTS = Path(

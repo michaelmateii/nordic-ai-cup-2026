@@ -34,8 +34,11 @@ from evaluate_nli_segmentwise import question_to_claim
 
 
 DEFAULT_QUESTION_CSV = Path(
-    r"C:\Users\Calle\Projects\Nordic-AI-Cup-2026-official"
-    r"\medical-appointment\data\question_train.csv"
+    Path(__file__).resolve().parents[3].parent
+    / "Nordic-AI-Cup-2026-official"
+    / "medical-appointment"
+    / "data"
+    / "question_train.csv"
 )
 
 DEFAULT_ASR_DIR = Path(

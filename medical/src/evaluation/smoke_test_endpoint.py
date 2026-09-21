@@ -9,10 +9,10 @@ from pathlib import Path
 import pandas as pd
 
 
-OFFICIAL_ROOT = Path(
-    r"C:\Users\Calle\Projects"
-    r"\Nordic-AI-Cup-2026-official"
-    r"\medical-appointment"
+OFFICIAL_ROOT = (
+    Path(__file__).resolve().parents[3].parent
+    / "Nordic-AI-Cup-2026-official"
+    / "medical-appointment"
 )
 
 QUESTION_CSV = (
@@ -109,7 +109,7 @@ def main() -> None:
 
     print("=" * 78)
     print(
-        "Nordic AI Cup 2026 â€?"
+        "Nordic AI Cup 2026 — "
         "Medical endpoint smoke test"
     )
     print("=" * 78)

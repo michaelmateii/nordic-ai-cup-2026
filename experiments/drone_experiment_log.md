@@ -94,8 +94,6 @@ The evaluator/API infrastructure is trustworthy and should be used as the refere
 
 ---
 
----
-
 # EXP-D002 — Dataset geometry and temporal analysis
 
 **Status:** COMPLETE
@@ -3597,127 +3595,11 @@ Next priorities:
 4. run another real validation attempt before evaluation
 5. continue targeted annotation for the five still-uncovered classes if time permits
 
-# EXP-D030 — Real-domain detector competition integration
-
-**Status:** RUNNING
-
-**Date:** 2026-09-17
-
-## Hypothesis
-
-The EXP-D029B detector can be integrated directly into the competition endpoint while retaining its real-domain detection accuracy and low inference latency.
-
-The previous production pipeline failed primarily because of domain shift and expensive proposal/classification stages.
-
-EXP-D029B replaces that architecture with a single-stage real-validation-domain YOLO11n detector.
-
-## Model
-
-Checkpoint:
-
-`drone/artifacts/exp_d029b/runs/yolo11n_validation_domain/weights/last.pt`
-
-Operating point selected by EXP-D029C:
-
-- confidence: 0.001
-- holdout recall @ IoU0.50: 0.786
-- held-out objects recovered: 11 / 14
-- proposals/frame: 42.4
-- median detector latency: 17.5 ms
-
-## Supported real-domain classes
-
-Real-validation supervision exists for:
-
-- hangar
-- helicopter
-- jet_plane
-- large_launcher
-- large_tower
-- medium_launcher
-- medium_plane
-- mine_roller
-- small_plane
-- small_tower
-- tank
-
-No real-validation supervision yet exists for:
-
-- condor
-- jammer
-- small_launcher
-- spacecraft
-- ta-ta
-
-## Integration requirements
-
-The endpoint must:
-
-1. load the EXP-D029B checkpoint once at startup
-2. warm the detector before the competition attempt
-3. run YOLO at confidence 0.001
-4. preserve competition class names exactly
-5. convert view-local boxes to full-source global coordinates
-6. return strictly valid normalized bounding boxes
-7. preserve request_id and frame exactly
-8. avoid unknown response fields
-9. remain comfortably below the realtime frame budget
-10. retain capture logging for post-validation analysis
-
-## Validation plan
-
-Before remote validation:
-
-- local endpoint health check
-- local offline evaluator
-- local realtime evaluator
-- verify zero invalid responses
-- verify zero camera refusals
-- measure round-trip latency
-
-Then:
-
-- expose endpoint through ngrok
-- competition Verify
-- competition Validation
-- inspect score and captured sequence
-
-## Offline integration test
-
-Helsinki offline replay:
-
-- frames sent: 25 / 25
-- frames skipped: 0
-- responses accepted: 25
-- invalid responses: 0
-- camera moves applied: 25
-- camera moves refused: 0
-- round-trip mean: 54 ms
-- round-trip median: 51 ms
-- round-trip max: 129 ms
-- Helsinki mAP@0.50: 0.001
-
-### Comparison with realtime
-
-Realtime:
-
-- median RTT: 50 ms
-- max RTT: 98 ms
-- mAP@0.50: 0.001
-
-Offline:
-
-- median RTT: 51 ms
-- max RTT: 129 ms
-- mAP@0.50: 0.001
-
-There is effectively no realtime frame-clock penalty.
-
-The endpoint is therefore comfortably fast enough, and deployment behavior is stable. Remaining uncertainty is model generalization to the real competition validation sequence.
+---
 
 ---
 
-# EXP-D031 — Stable fixed-L1 competition validation
+# EXP-D032 — Full real-domain detector training
 
 **Status:** COMPLETE
 
@@ -3725,118 +3607,17 @@ The endpoint is therefore comfortably fast enough, and deployment behavior is st
 
 ## Hypothesis
 
-The EXP-D030 score was being materially degraded by unstable asynchronous L1 camera movement rather than detector quality alone.
+Training on the full canonical real-validation-domain dataset should improve over the leakage-reduced EXP-D029B model once the holdout experiment has already established that the domain-adaptation strategy generalizes.
 
-Holding the camera at one legal L1 position should eliminate camera-command failures and provide a cleaner measurement of the EXP-D029 detector.
+## Data
 
-## Change
+Canonical real-domain dataset:
 
-Replaced the rotating L1 scanner with a stable camera policy:
+- Frames: 77
+- Boxes: 115
+- Classes represented: 11 / 16
 
-1. begin from the initial L0 full-frame view
-2. request L1 at center `(1920, 1080)`
-3. once L1 is reached, issue no further camera commands
-
-Capture I/O was also disabled during the benchmark to minimize endpoint overhead.
-
-Detector remained unchanged:
-
-- EXP-D029B YOLO11n
-- confidence: 0.001
-- image size: 960
-- real-validation-domain training
-
-## Local realtime test
-
-Helsinki realtime replay:
-
-- frames sent: 25 / 25
-- frames skipped: 0
-- responses accepted: 25
-- invalid responses: 0
-- camera moves applied: 1
-- camera moves refused: 0
-- round-trip mean: 51 ms
-- round-trip median: 48 ms
-- round-trip max: 92 ms
-- Helsinki mAP@0.50: 0.000
-
-The Helsinki score was expected to be uninformative because the detector is adapted to the competition validation domain.
-
-The deployment behavior was fully stable.
-
-## Remote competition validation
-
-Validation result:
-
-- score: **0.1134307532**
-- errors: **none**
-
-Previous D030 validation:
-
-- score: 0.0715408752
-- repeated camera-command failures
-
-Relative score improvement:
-
-- **+58.6%**
-
-## Interpretation
-
-The rotating L1 camera policy was materially reducing competition performance.
-
-Removing L1-to-L1 movement:
-
-- eliminated all camera-command errors
-- improved validation score from 0.07154 to 0.11343
-- produced a cleaner measurement of detector quality
-- confirmed that the real-domain detector itself is useful
-
-The fixed-center policy is therefore substantially better than the previous asynchronous scan policy.
-
-This also confirms that local camera simulation was not sufficient to validate the original scanner: it produced zero refused moves locally while the remote evaluator rejected many commands.
-
-## Decision
-
-**KEEP — NEW BEST REMOTE VALIDATION**
-
-Best competition-validation score so far:
-
-**0.1134307532**
-
-Current deployment baseline:
-
-- EXP-D029B detector
-- confidence 0.001
-- fixed centered L1 view
-- no L1-to-L1 camera movement
-- no capture I/O during benchmark
-
----
-
-# EXP-D032 — Full real-domain production training and model-capacity comparison
-
-**Status:** COMPLETE
-
-**Date:** 2026-09-18
-
-## Hypothesis
-
-After EXP-D029 established that real-domain supervision generalizes to held-out validation objects, the production detector should benefit from restoring all 115 canonical annotations instead of withholding data for internal evaluation.
-
-A larger YOLO11s model may additionally improve localization of small and difficult targets while remaining comfortably within the competition latency budget.
-
-## Dataset
-
-Canonical validation-domain dataset from EXP-D029:
-
-- frames: **77**
-- boxes: **115**
-- manual annotations: **44**
-- accepted pseudo-labels retained after deduplication: **71**
-- represented classes: **11 / 16**
-
-Real-domain class counts:
+Class counts:
 
 - hangar: 5
 - helicopter: 9
@@ -3850,7 +3631,7 @@ Real-domain class counts:
 - small_tower: 12
 - tank: 33
 
-Classes still absent from real-domain supervision:
+Still uncovered:
 
 - condor
 - jammer
@@ -3858,219 +3639,53 @@ Classes still absent from real-domain supervision:
 - spacecraft
 - ta-ta
 
-The leakage-aware D029 holdout was intentionally no longer preserved for production training because EXP-D029C had already demonstrated generalization:
+## Models
 
-- held-out recall @ IoU0.50: **11 / 14**
-- recall: **0.786**
+### YOLO11n
 
-All 115 canonical annotations were therefore restored for the production detector.
+Validation metrics on full real-domain dataset:
 
-## EXP-D032A — YOLO11n full-data detector
+- Precision: 0.949
+- Recall: 0.961
+- mAP@0.50: 0.967
+- mAP@0.50:0.95: 0.798
 
-Model:
+### YOLO11s
 
-- base: `yolo11n.pt`
-- parameters: **2,585,272**
-- GFLOPs: **6.4**
-- image size: 960
-- epochs: 100
-- pretrained: yes
-- device: Apple M1 MPS
+Validation metrics:
 
-Training augmentation remained conservative:
+- Precision: 0.961
+- Recall: 0.955
+- mAP@0.50: 0.968
+- mAP@0.50:0.95: 0.842
 
-- HSV hue: 0.01
-- saturation: 0.20
-- value: 0.20
-- rotation: 3 degrees
-- translation: 0.05
-- scale: 0.15
-- horizontal flip: 0.5
-- mosaic: 0.25
-- mixup: 0
-- copy-paste: 0
-
-Training-set results:
-
-- precision: **0.949**
-- recall: **0.961**
-- mAP@0.50: **0.967**
-- mAP@0.50:0.95: **0.798**
-
-Per-class mAP@0.50:0.95:
-
-| Class | mAP50-95 |
-|---|---:|
-| hangar | 0.940 |
-| helicopter | 0.891 |
-| jet_plane | 0.811 |
-| large_launcher | 0.964 |
-| large_tower | 0.799 |
-| medium_launcher | 0.763 |
-| medium_plane | 0.833 |
-| mine_roller | 0.887 |
-| small_plane | 0.498 |
-| small_tower | 0.613 |
-| tank | 0.783 |
-
-Reported training-pass speed:
-
-- preprocess: 0.3 ms/image
-- inference: 13.9 ms/image
-- postprocess: 14.5 ms/image
-
-Checkpoint:
-
-`drone/artifacts/exp_d032/runs/yolo11n_full_real_domain/weights/last.pt`
-
-## EXP-D032B — YOLO11s full-data detector
-
-Model:
-
-- base: `yolo11s.pt`
-- parameters: **9,418,992**
-- GFLOPs: **21.5**
-- image size: 960
-- epochs: 100
-- same full 115-box dataset
-- same augmentation family
-
-Training-set results:
-
-- precision: **0.961**
-- recall: **0.955**
-- mAP@0.50: **0.968**
-- mAP@0.50:0.95: **0.842**
-
-Per-class mAP@0.50:0.95:
-
-| Class | mAP50-95 |
-|---|---:|
-| hangar | 0.955 |
-| helicopter | 0.939 |
-| jet_plane | 0.825 |
-| large_launcher | 0.920 |
-| large_tower | 0.879 |
-| medium_launcher | 0.852 |
-| medium_plane | 0.839 |
-| mine_roller | 0.905 |
-| small_plane | 0.620 |
-| small_tower | 0.707 |
-| tank | 0.819 |
-
-Reported training-pass speed:
-
-- preprocess: 0.3 ms/image
-- inference: 7.8 ms/image
-- postprocess: 32.4 ms/image
-
-Checkpoint:
-
-`drone/artifacts/exp_d032/runs/yolo11s_full_real_domain/weights/last.pt`
-
-## Training-set comparison
-
-YOLO11s improved mAP@0.50:0.95 from:
-
-- YOLO11n: 0.798
-- YOLO11s: **0.842**
-
-Notable improvements included:
-
-- small_plane: 0.498 -> 0.620
-- small_tower: 0.613 -> 0.707
-- large_tower: 0.799 -> 0.879
-- medium_launcher: 0.763 -> 0.852
-- helicopter: 0.891 -> 0.939
-
-However, these are resubstitution metrics on the training set and are not used as the authoritative production decision.
-
-## Deployment configuration
-
-Both models were tested under the exact EXP-D031 deployment policy:
-
-- fixed centered L1 view
-- target center: `(1920, 1080)`
-- no L1-to-L1 camera movement
-- confidence: 0.001
-- NMS IoU: 0.70
-- image size: 960
-- capture I/O disabled
-- identical endpoint implementation
-
-Current pre-D032 best:
-
-- EXP-D031: **0.1134307532**
-
-## Remote validation — YOLO11n
-
-EXP-D032A result:
-
-- score: **0.1271957815**
-- errors: **none**
-
-Improvement over EXP-D031:
-
-- absolute: +0.0137650
-- relative: approximately **+12.1%**
-
-This confirmed that restoring the complete 115-box canonical dataset improved hidden validation performance.
-
-## Remote validation — YOLO11s
-
-EXP-D032B result:
-
-- score: **0.1211453220**
-- errors: **none**
-
-Despite stronger training-set metrics, YOLO11s scored lower than YOLO11n remotely.
-
-Comparison:
-
-- YOLO11n: **0.1271957815**
-- YOLO11s: 0.1211453220
-
-YOLO11s was approximately **4.8% worse** relative to YOLO11n on remote validation.
+YOLO11s achieved better resubstitution localization quality, especially at higher IoU thresholds.
 
 ## Interpretation
 
-Increasing real-domain supervision from 67 training boxes to the complete 115-box canonical set produced a genuine hidden-validation improvement.
+Both models fit the validation-domain supervision extremely well.
 
-Increasing model capacity from YOLO11n to YOLO11s did not.
+However, earlier experiments established that internal training/validation metrics are not sufficient for model selection. Remote competition validation remains authoritative.
 
-This is an important model-selection result:
-
-- stronger training-set mAP did not predict stronger hidden-validation performance
-- the smaller YOLO11n generalized better
-- additional real-domain data was more valuable than additional model capacity
+YOLO11n was selected first for deployment because it is substantially lighter and leaves more realtime headroom.
 
 ## Decision
 
-**KEEP EXP-D032A YOLO11n.**
+**KEEP both checkpoints.**
 
-Production checkpoint:
-
-`drone/artifacts/exp_d032/runs/yolo11n_full_real_domain/weights/last.pt`
-
-New best remote validation score:
-
-**0.1271957815**
-
-Reject YOLO11s for production unless later data changes justify retesting.
+Deploy YOLO11n first and compare remotely before adopting the larger model.
 
 ---
 
-# EXP-D033 — Missing-class recovery investigation
+# EXP-D033 — Unique-view / missing-class search
 
-**Status:** ABANDONED
+**Status:** COMPLETE / NEGATIVE RESULT
 
 **Date:** 2026-09-18
 
 ## Hypothesis
 
-The five competition classes absent from the real-domain training set may still appear in previously captured validation views and could potentially be recovered through targeted search.
-
-Missing real-domain classes:
+Additional retained validation views may expose the five classes still missing from real-domain supervision:
 
 - condor
 - jammer
@@ -4078,763 +3693,180 @@ Missing real-domain classes:
 - spacecraft
 - ta-ta
 
-Because competition scoring is macro-averaged across classes, recovering even sparse supervision for these classes could materially raise the score ceiling.
+## Change
 
-## Initial manual search
+Constructed unique-view pools and contact sheets from retained validation captures to search for visually distinct regions and previously unseen targets.
 
-The existing real-domain annotation sequence was re-inspected using a targeted five-class annotation workflow.
+## Result
 
-Approximately 140 candidate frames were reviewed.
+Manual inspection did not reveal reliable examples of the five missing classes.
 
-Result:
-
-- no confident examples of the five missing classes were found
-- the reviewed imagery substantially overlapped the same material already used to annotate the existing 11 classes
-
-## Multi-capture spatial mining
-
-Multiple retained validation captures were then combined, including sequences generated under different camera policies.
-
-The intention was to expose spatial regions not present in the original manual annotation pass.
-
-A contact sheet was created from captured L1 views.
-
-However, the first implementation incorrectly treated:
-
-`frame_index + camera region`
-
-as a unique view.
-
-This produced a very large montage dominated by temporally adjacent versions of the same scenery.
-
-A second attempt deduplicated by spatial crop only, but the underlying validation flyby still contained long visually similar geographic regions and remained inefficient for manual discovery.
-
-## Model-assisted retrieval
-
-The previous EXP-D010 + EXP-D013 pipeline was repurposed as a retrieval system:
-
-- EXP-D010 tiled YOLO objectness detector generated candidate boxes
-- EXP-D013 MobileNetV3 classifier scored each proposal
-- every proposal was scored against all five missing classes
-- top candidates were ranked per target class
-- human-readable candidate montages were generated
-
-This intentionally did not trust classifier argmax predictions.
-
-The retrieval system produced high classifier probabilities for many candidates, including apparent probabilities near 1.0.
-
-## Human verification
-
-Human inspection showed that the high-confidence candidates were false positives.
-
-Examples included:
-
-### condor
-
-Retrieved candidates consisted of:
-
-- ordinary aircraft-like silhouettes not matching the competition target
-- terrain structures
-- roads
-- shadows
-- vegetation
-
-Focused verification of high-ranked candidates such as frames 67 and 72 did not produce reliable condor supervision.
-
-### spacecraft
-
-The retrieval system repeatedly identified a small recurring object in a field and assigned extremely high spacecraft probabilities.
-
-Closer inspection showed these were not trustworthy spacecraft targets.
-
-### jammer
-
-Top candidates were mostly:
-
-- vehicles
-- roof clutter
-- vegetation
-- small dark rectangular structures
-
-No reliable jammer seed was identified.
-
-### small_launcher
-
-Top candidates were dominated by:
-
-- construction-site clutter
-- roof objects
-- small vehicles
-- unrelated tiny structures
-
-No reliable seed was identified.
-
-### ta-ta
-
-Top candidates were dominated by:
-
-- roof features
-- courtyards
-- bright horizontal clutter
-
-No trustworthy ta-ta seed was identified.
+The generated contact sheets largely contained the same visual regions and repeated validation imagery already inspected.
 
 ## Interpretation
 
-The old classifier was highly overconfident outside its original training distribution.
+The remaining missing classes cannot be recovered cheaply through broader contact-sheet sampling of the currently captured validation data.
 
-Classifier probability was therefore unsuitable as direct evidence of class identity.
-
-The retained validation captures did not provide trustworthy examples of the five missing classes.
-
-Continuing this branch would risk poisoning the training set with incorrect labels.
-
-The investigation nevertheless provided useful evidence:
-
-- these five classes are not easily recoverable from the retained validation imagery
-- model-assisted retrieval is not sufficiently trustworthy for pseudo-labeling them
-- the existing 11-class real-domain detector should remain the production foundation
+Further manual searching has low expected value compared with improving the detector on the 11 represented classes.
 
 ## Decision
 
-**ABANDON missing-class recovery from current captured data.**
-
-Do not add any D033 retrieval candidates to the training set.
-
-Do not propagate these candidate labels.
-
-Shift effort to direct optimization of the validated 11-class production detector and deployment operating point.
+**STOP broad missing-class search for now.**
 
 ---
 
-# EXP-D034 — Remote operating-point optimization
+# EXP-D034 — Full real-domain model remote deployment
 
-**Status:** RUNNING
+**Status:** COMPLETE
 
 **Date:** 2026-09-18
 
 ## Hypothesis
 
-The full-data EXP-D032A YOLO11n detector may be producing too many low-confidence false positives when deployed at the EXP-D029 holdout-selected confidence threshold of 0.001.
+The full 115-box real-domain YOLO11n model should outperform the earlier leakage-reduced D029 model on the official validation sequence.
 
-Because the production model now uses all 115 canonical annotations, the previous holdout-derived threshold may no longer be optimal.
+## Runtime
 
-Repeated competition validation can therefore be used to tune the actual deployment operating point while keeping model weights and camera policy fixed.
-
-## Fixed configuration
-
-Model:
-
-`drone/artifacts/exp_d032/runs/yolo11n_full_real_domain/weights/last.pt`
-
-Fixed parameters:
-
-- model: YOLO11n
-- real-domain training boxes: 115
-- image size: 960
-- NMS IoU: 0.70
-- camera policy: fixed centered L1
-- center: `(1920, 1080)`
-- no L1-to-L1 movement
-- capture I/O disabled
-- same public endpoint
-- no architecture changes
-
-Only inference confidence is changed.
-
-## Baseline
-
-EXP-D032A at:
-
-`confidence = 0.001`
-
-Remote validation:
-
-- score: **0.1271957815**
-- errors: none
-
-## EXP-D034A — confidence 0.005
-
-Changed:
-
-`CONFIDENCE = 0.005`
-
-All other deployment parameters remained identical.
-
-Remote validation result:
-
-- score: **0.1402458666**
-- errors: **none**
-
-Improvement over confidence 0.001:
-
-- absolute: **+0.0130500850**
-- relative: approximately **+10.3%**
-
-Improvement over the earlier EXP-D031 67-box detector:
-
-- EXP-D031: 0.1134307532
-- EXP-D034A: **0.1402458666**
-- relative improvement: approximately **+23.6%**
-
-## Interpretation
-
-The hidden validation sequence benefits substantially from suppressing extremely low-confidence detections.
-
-The confidence threshold selected using the small leakage-aware D029 holdout was too permissive for the final full-data production model.
-
-The higher threshold likely reduces false positives enough to outweigh the loss of low-confidence true positives.
-
-This result also reinforces that the competition's hidden remote validation is the authoritative deployment-selection signal.
-
-## Current best configuration
-
-- detector: D032A YOLO11n
-- training set: 115 canonical real-domain boxes
-- confidence: **0.005**
-- NMS IoU: 0.70
-- image size: 960
-- camera: fixed centered L1
-- capture: disabled
-
-Best remote validation score:
-
-**0.1402458666**
-
-Errors:
-
-**none**
-
-## Next experiments
-
-Continue confidence sweep while changing no other variable:
-
-1. confidence 0.010
-2. confidence 0.025
-3. confidence 0.050 only if the score continues improving
-
-If confidence 0.010 performs worse than 0.005, test a narrower interval:
-
-- 0.002
-- 0.003
-- potentially intermediate values around the best region
-
-After confidence is optimized:
-
-1. NMS IoU sweep
-2. fixed camera-center comparison
-3. training-seed / augmentation experiments
-4. possible higher-resolution inference
-5. possible ensemble only if validation evidence justifies the complexity
-
-## Decision
-
-**KEEP confidence 0.005 as the current best operating point.**
-
-Current score to beat:
-
-**0.1402458666**
-
----
-
-## EXP-D034B — confidence 0.010
-
-Changed:
-
-`CONFIDENCE = 0.010`
-
-All other deployment parameters remained identical.
-
-Remote validation result:
-
-- score: **0.1230270320**
-- errors: **none**
-
-Comparison:
-
-- confidence 0.001: 0.1271957815
-- confidence 0.005: **0.1402458666**
-- confidence 0.010: 0.1230270320
-
-Relative difference versus confidence 0.005:
-
-- approximately **-12.3%**
-
-## Interpretation
-
-Increasing the confidence threshold from 0.005 to 0.010 removed too many useful detections.
-
-The remote score therefore exhibits a clear interior optimum rather than monotonically improving with stronger filtering.
-
-The useful confidence region is now bracketed between approximately 0.001 and 0.010, with the current optimum at 0.005.
-
-## Decision
-
-**REJECT confidence 0.010.**
-
-Retain confidence 0.005 as the current best operating point and perform a fine-grained sweep around it.
-
----
-
-## EXP-D034C — confidence 0.003
-
-Changed:
-
-`CONFIDENCE = 0.003`
-
-All other deployment parameters remained fixed.
-
-Remote validation result:
-
-- score: **0.1237819620**
-- errors: **none**
-
-Comparison:
-
-- confidence 0.001: 0.1271957815
-- confidence 0.003: 0.1237819620
-- confidence 0.005: **0.1402458666**
-- confidence 0.010: 0.1230270320
-
-## Interpretation
-
-Confidence 0.003 did not improve over either the original 0.001 baseline or the current 0.005 optimum.
-
-The response is therefore not monotonic with confidence threshold. Individual low-confidence detections appear to have substantial influence on the macro evaluation score.
-
-The current evidence indicates a relatively narrow optimum around confidence 0.005.
-
-## Decision
-
-**REJECT confidence 0.003.**
-
-Current best remains:
-
-- confidence: **0.005**
-- score: **0.1402458666**
-
-----
-
-## EXP-D034D — Remote validation reproducibility
-
-After uncertainty was discovered around server restarts during the fine confidence
-sweep, the endpoint was explicitly reset to the known D032A production model with:
-
-- YOLO11n full real-domain checkpoint
-- confidence: 0.005
-- NMS IoU: 0.70
-- imgsz: 960
-- fixed centered L1 camera
-- capture disabled
-
-Two consecutive remote validation attempts were then run without changing or
-restarting the server.
-
-Results:
-
-- run 1: **0.1259454492**
-- run 2: **0.1231092412**
-- mean: **0.1245273452**
-- absolute run-to-run spread: **0.0028362080**
-
-Earlier nominal confidence-0.005 result:
-
-- 0.1402458666
-
-The earlier 0.14025 result has not yet reproduced and should not be used alone
-to establish the optimal threshold.
-
-### Interpretation
-
-Remote validation contains enough run-to-run variability that single-attempt
-score differences cannot safely be attributed to small parameter changes.
-
-Fine-grained tuning such as confidence 0.004 versus 0.005 is therefore premature.
-
-Model-selection decisions should use repeated attempts under explicitly verified
-runtime configuration.
-
-### Decision
-
-Pause fine confidence tuning.
-
-Compare the strongest candidate thresholds using repeated controlled runs and
-select based on mean/median performance rather than a single best validation score.
-
----
-
-## Controlled confidence reproducibility
-
-A fresh server restart explicitly printed:
-
-- model: EXP-D032 YOLO11n full real-domain
-- confidence: 0.001
-- NMS IoU: 0.70
-- image size: 960
-
-Remote validation result:
-
-- score: **0.1259796970**
-- errors: none
-
-This closely matches the earlier clean confidence-0.001 result:
-
-- 0.1271957815
-
-Current controlled estimates:
-
-- confidence 0.001:
-  - 0.1271957815
-  - 0.1259796970
-  - mean ≈ **0.12659**
-
-- confidence 0.005:
-  - 0.1259454492
-  - 0.1231092412
-  - mean ≈ **0.12453**
-
-- confidence 0.010:
-  - 0.1230270320
-
-Interpretation:
-
-Confidence 0.001 currently has the strongest reproducible expected performance.
-
-The isolated 0.1402458666 result at nominal confidence 0.005 appears to be an outlier or configuration/state-dependent run and should not be treated as the sole basis for model selection.
-
----
-
-# EXP-D035 — Realtime frame-coverage investigation
-
-**Status:** RUNNING
-
-**Date:** 2026-09-18
-
-## Motivation
-
-Repeated remote validation scores showed material run-to-run variation even under
-an unchanged detector and inference configuration.
-
-Server-side telemetry was added to determine whether request coverage, rather than
-model inference, was responsible.
-
-## Configuration
-
-- model: EXP-D032A YOLO11n
-- confidence: 0.001
-- NMS IoU: 0.70
-- image size: 960
-- camera: fixed centered L1
-- capture I/O: disabled
-- public transport: ngrok
-- server: local Apple M1
-
-## Remote telemetry
-
-Validation score:
-
-- **0.1267514088**
-
-Errors:
-
-- none
-
-Requests observed by endpoint:
-
-- **175 / 249**
-- coverage: **70.3%**
-- missing frames: **74**
-
-Server-side request latency:
-
-- median: **59.9 ms**
-- maximum: **128.6 ms**
-
-## Interpretation
-
-The model runtime is comfortably below the 333 ms interval implied by the 3 fps
-evaluation clock, yet nearly 30% of frames never reach the endpoint.
-
-Therefore local model inference is not the dominant source of realtime frame loss.
-
-The likely remaining latency lies outside the measured server section:
-
-competition evaluator -> public network -> ngrok -> local Mac -> ngrok -> evaluator.
-
-The earlier D030 capture showed a similar problem:
-
-- 165 / 249 requests
-- 66.3% coverage
-
-This makes end-to-end transport and request delivery a major remaining optimization target.
-
-## Decision
-
-**PAUSE fine model operating-point tuning.**
-
-Measure ngrok transport behavior and investigate direct/cloud deployment with the
-goal of substantially increasing the fraction of the 249-frame validation sequence
-actually processed.
-
-## EXP-D035A — ngrok transport measurement
-
-The ngrok local inspection API was queried after a competition validation run.
-
-Observed `/predict` request sizes were approximately:
-
-- 1.44 MB
-- 1.45 MB
-- 1.46 MB
-
-Representative ngrok request durations:
-
-- ~356 ms
-- ~427 ms
-- ~389 ms
-- ~396 ms
-- ~405 ms
-
-The competition frame interval is 333 ms.
-
-Therefore even representative tunnel requests frequently require longer than one
-frame interval end-to-end.
-
-This is consistent with endpoint telemetry:
-
-- requests received: 175 / 249
-- coverage: 70.3%
-- server-side median latency: 59.9 ms
-- server-side maximum latency: 128.6 ms
-
-The model itself is therefore not responsible for the majority of the realtime
-frame loss.
-
-### Interpretation
-
-The dominant bottleneck is the public transport path through ngrok/local hosting.
-
-The ~1.45 MB request payload at 3 fps also creates substantial continuous network
-traffic before model inference is considered.
-
-### Decision
-
-**HIGH PRIORITY — MOVE PRODUCTION ENDPOINT TO A DIRECTLY REACHABLE EUROPEAN CLOUD VM.**
-
-Freeze model/camera parameters during this experiment so the effect of deployment
-location can be measured independently.
-
-Target configuration:
-
-- D032A YOLO11n
-- confidence 0.001
-- NMS IoU 0.70
-- imgsz 960
-- fixed centered L1 camera
-- capture disabled
-- direct public endpoint
-- no ngrok
-
-Success metric:
-
-- substantially increase received-frame coverage beyond 175 / 249
-- preserve zero API/schema errors
-- improve remote validation score
-
----
-
-# EXP-D035B — Direct AWS Stockholm deployment
-
-**Status:** COMPLETE — MAJOR IMPROVEMENT
-
-**Date:** 2026-09-18
-
-## Hypothesis
-
-The local Mac + ngrok deployment was dropping a substantial fraction of realtime
-competition requests because end-to-end tunnel latency exceeded the approximately
-333 ms frame interval.
-
-Moving the exact same detector and camera policy to a directly reachable cloud VM
-in Stockholm should improve request coverage and therefore remote validation score.
-
-## Infrastructure
-
-Provider:
-
-- AWS EC2
-
-Region:
-
-- Europe (Stockholm)
-- `eu-north-1`
-
-Instance:
-
-- `m7i-flex.large`
-- 2 vCPU
-- 8 GiB RAM
-- Intel Xeon Platinum 8488C
-- Ubuntu Server 24.04 x86_64
-- public IPv4
-- direct TCP endpoint
-- no ngrok
-
-Storage:
-
-- 20 GiB gp3
-
-## Detector configuration
-
-The detector configuration was intentionally frozen relative to the previous
-baseline:
-
-- model: EXP-D032A YOLO11n full real-domain
+- model: EXP-D032 YOLO11n
 - checkpoint: `last.pt`
 - confidence: 0.001
 - NMS IoU: 0.70
-- image size: 960
-- camera: fixed centered L1
-- center: `(1920, 1080)`
-- capture I/O: disabled
+- imgsz: 960
+- fixed L1 centered view
+- Mac + ngrok deployment
 
-Only the deployment infrastructure changed.
+## Remote validation results
 
-## CPU benchmark
+Representative clean runs:
 
-PyTorch CPU configuration:
+- 0.1271957815
+- 0.1211453220
+- 0.1402458666
+- 0.1230270320
+- 0.1237819620
+- 0.1426608582
+- 0.1227743876
+- 0.1259454492
+- 0.1231092412
+- 0.1259796970
+- 0.1163018758
+- 0.1267514088
 
-- intra-op threads: 2
-- inter-op threads: 1
+Best observed ngrok-era result:
 
-20-run YOLO benchmark:
-
-- mean: **99.3 ms**
-- median: **99.2 ms**
-- p95: **103.2 ms**
-- maximum: **106.6 ms**
-
-This was comfortably below the approximate 333 ms realtime frame interval.
-
-## Remote validation telemetry
-
-Requests received:
-
-- **248 / 249**
-- coverage: **99.6%**
-- missing frames: **1**
-
-Missing frame:
-
-- index 74
-
-Endpoint processing latency:
-
-- median: **109.8 ms**
-- maximum: **140.1 ms**
-
-Final frame:
-
-- frame 249
-- index 248
-- L1 center `(1920,1080)`
-- detections: 11
-- total: 110.1 ms
-
-## Remote validation result
-
-Score:
-
-**0.1640706308**
-
-Errors:
-
-**none**
-
-## Comparison with Mac + ngrok
-
-Comparable ngrok run:
-
-- requests received: 175 / 249
-- coverage: 70.3%
-- score: 0.1267514088
-
-AWS direct deployment:
-
-- requests received: 248 / 249
-- coverage: 99.6%
-- score: 0.1640706308
-
-Relative score improvement:
-
-**approximately +29.4%**
+**0.1426608582**
 
 ## Interpretation
 
-The transport layer was a major performance bottleneck.
+The full real-domain detector is clearly better than the earlier Helsinki-based systems.
 
-The detector itself was sufficiently fast, but the ngrok/local route caused enough
-end-to-end delay that roughly 30% of realtime frames were never delivered to the
-endpoint.
+However, score variance remained unexpectedly large even when model/runtime settings were unchanged.
 
-Direct deployment in Stockholm effectively eliminated the frame-loss problem:
+Remote telemetry later showed that the Mac + ngrok endpoint was receiving only roughly 175 / 249 requests on some runs.
 
-- 70.3% coverage -> 99.6% coverage
-
-This produced the largest single remote score improvement since real-domain
-training.
-
-The 2-vCPU CPU-only EC2 instance is fast enough for the competition workload and
-does not require GPU inference.
+Therefore model selection during this phase was heavily confounded by transport/frame-loss instability.
 
 ## Decision
 
-**KEEP AWS STOCKHOLM AS THE PRODUCTION DEPLOYMENT.**
+**KEEP D032 YOLO11n.**
 
-Do not return to ngrok for final evaluation.
-
-Current best remote validation score:
-
-**0.1640706308**
+Do not trust fine-grained remote parameter comparisons until deployment transport is fixed.
 
 ---
 
-## EXP-D036A — AWS confidence 0.005
+# EXP-D035 — Direct AWS Stockholm deployment
 
-Fixed configuration:
+**Status:** COMPLETE — MAJOR INFRASTRUCTURE IMPROVEMENT
 
-- model: D032A YOLO11n
+**Date:** 2026-09-18
+
+## Hypothesis
+
+The Mac + ngrok deployment is dropping a substantial fraction of realtime frames.
+
+Moving the same detector and camera policy to a directly reachable cloud VM in Stockholm should improve request coverage and score even if CPU inference is slower.
+
+## Infrastructure
+
+AWS EC2:
+
+- Region: Europe (Stockholm), `eu-north-1`
+- Instance: `m7i-flex.large`
+- 2 vCPU
+- 8 GiB RAM
+- Intel Xeon Platinum 8488C
+- Ubuntu 24.04 x86_64
+- direct public IPv4
+- no ngrok
+
+## Model
+
+Frozen configuration:
+
+- D032 YOLO11n
+- confidence: 0.001
 - NMS IoU: 0.70
 - imgsz: 960
-- fixed centered L1
-- AWS Stockholm direct endpoint
+- fixed L1 center `(1920,1080)`
 
-Changed:
+## CPU benchmark
 
-- confidence: 0.001 -> 0.005
+YOLO11n @ 960:
 
-Remote validation:
+- mean: 99.3 ms
+- median: 99.2 ms
+- p95: 103.2 ms
+- max: 106.6 ms
 
-- score: **0.1630635797**
-- coverage: **247 / 249**
-- missing indices: `[33, 34]`
-- median endpoint latency: **96.3 ms**
-- max endpoint latency: **108.7 ms**
-- errors: none
+## Remote validation
 
-The score is slightly below the current confidence-0.001 AWS mean (~0.16505),
-but the difference is small enough to require replication.
+Run 1:
 
-Decision:
+- score: **0.1640706308**
+- coverage: **248 / 249**
+- median endpoint latency: **109.8 ms**
+- max endpoint latency: **140.1 ms**
 
-**REPEAT 0.005 once under the unchanged server process before selecting a threshold.**
+Run 2:
+
+- score: **0.1660387593**
+
+Comparable Mac + ngrok run:
+
+- score: 0.1267514088
+- coverage: 175 / 249
+
+## Interpretation
+
+Transport was a major bottleneck.
+
+The AWS CPU endpoint was slower than Mac inference but delivered almost every frame.
+
+Coverage improved from approximately:
+
+- 70.3%
+to
+- 99.6%
+
+This produced a large score increase.
+
+## Decision
+
+**KEEP AWS direct deployment.**
+
+Treat AWS as the clean reference environment for remote model selection.
 
 ---
 
-## EXP-D036B — Confidence comparison completed
+# EXP-D036 — AWS confidence sweep
 
-AWS Stockholm direct-deployment results:
+**Status:** COMPLETE
 
-### Confidence 0.001
+**Date:** 2026-09-18
+
+## Baseline
+
+Confidence 0.001:
 
 - 0.1640706308
 - 0.1660387593
@@ -4843,7 +3875,9 @@ Mean:
 
 **0.1650546951**
 
-### Confidence 0.005
+## Confidence 0.005
+
+Runs:
 
 - 0.1630635797
 - 0.1638353306
@@ -4852,357 +3886,124 @@ Mean:
 
 **0.1634494552**
 
-Difference:
+## Interpretation
 
-- absolute: approximately +0.00161 in favor of 0.001
-- relative: approximately +1.0%
+Once transport noise was removed, confidence 0.001 consistently outperformed 0.005.
+
+## Decision
+
+**KEEP confidence = 0.001**
+
+---
+
+# EXP-D037 — NMS sweep
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-18
+
+## Results
+
+### NMS IoU 0.50
+
+- score: 0.1597725318
+- coverage: 246 / 249
+- median latency: 97.7 ms
+
+### NMS IoU 0.60
+
+- score: 0.1644263785
+- coverage: 249 / 249
+- median latency: 102.1 ms
+
+### NMS IoU 0.70
+
+Baseline mean:
+
+**~0.16505**
 
 ## Interpretation
 
-Once transport instability was removed through the AWS deployment, the lower
-confidence threshold proved slightly but consistently better.
+0.50 is clearly too aggressive.
 
-The earlier apparent advantage of confidence 0.005 was caused by noisy ngrok-era
-validation runs and is not supported by the cleaner AWS measurements.
+0.60 is competitive but does not beat the 0.70 baseline.
 
 ## Decision
 
-**KEEP confidence 0.001.**
-
-Current production baseline:
-
-- model: D032A YOLO11n
-- confidence: 0.001
-- NMS IoU: 0.70
-- imgsz: 960
-- fixed centered L1
-- AWS Stockholm
-
-## EXP-D037A — NMS IoU 0.50
-
-Fixed:
-
-- model: D032A YOLO11n
-- confidence: 0.001
-- imgsz: 960
-- fixed centered L1
-- AWS Stockholm direct endpoint
-
-Changed:
-
-- NMS IoU: 0.70 -> 0.50
-
-Remote validation:
-
-- score: **0.1597725318**
-- coverage: **246 / 249**
-- missing frames: `[189, 191, 239]`
-- median endpoint latency: **97.7 ms**
-- max endpoint latency: **110.7 ms**
-- errors: none
-
-Interpretation:
-
-The lower NMS threshold suppresses too many useful detections.
-
-Decision:
-
-**REJECT NMS IoU 0.50.**
+**KEEP NMS IoU = 0.70**
 
 ---
 
-## EXP-D037B — NMS IoU 0.60
+# EXP-D038 — Fixed-camera center sweep
 
-Fixed:
+**Status:** COMPLETE
 
-- model: D032A YOLO11n
-- confidence: 0.001
-- imgsz: 960
-- fixed centered L1
-- AWS Stockholm direct endpoint
-
-Changed:
-
-- NMS IoU: 0.70 -> 0.60
-
-Remote validation:
-
-- score: **0.1644263785**
-- coverage: **249 / 249**
-- missing frames: none
-- median endpoint latency: **102.1 ms**
-- max endpoint latency: **113.6 ms**
-- errors: none
-
-Interpretation:
-
-NMS IoU 0.60 performs substantially better than 0.50 and is broadly comparable
-to the 0.70 baseline.
-
-However, the two clean NMS 0.70 runs averaged approximately 0.16505, slightly
-above this single 0.60 result.
-
-Decision:
-
-**Do not switch yet. Retain NMS IoU 0.70 as the current baseline.**
-
----
-
-## EXP-D038A — Fixed camera center (960,540)
-
-Fixed:
-
-- model: D032A YOLO11n
-- confidence: 0.001
-- NMS IoU: 0.70
-- imgsz: 960
-- AWS Stockholm direct endpoint
-
-Changed:
-
-- fixed L1 camera center:
-  - baseline: `(1920,1080)`
-  - experiment: `(960,540)`
-
-Remote validation:
-
-- score: **0.0882966277**
-- coverage: **249 / 249**
-- missing frames: none
-- median endpoint latency: **102.8 ms**
-- max endpoint latency: **117.7 ms**
-- errors: none
-
-Interpretation:
-
-The upper-left L1 crop exposes substantially less useful target content than the
-centered L1 crop.
-
-Because frame delivery was perfect, the score decrease is attributable to camera
-coverage rather than transport.
-
-Decision:
-
-**REJECT center (960,540).**
-
----
-
-## EXP-D038B — Fixed camera center (2880,540)
-
-Fixed:
-
-- model: D032A YOLO11n
-- confidence: 0.001
-- NMS IoU: 0.70
-- imgsz: 960
-- AWS Stockholm direct endpoint
-
-Changed:
-
-- fixed L1 camera center:
-  - experiment: `(2880,540)`
-
-Remote validation:
-
-- score: **0.1468870281**
-- coverage: **249 / 249**
-- missing frames: none
-- median endpoint latency: **100.5 ms**
-- max endpoint latency: **110.4 ms**
-- errors: none
-
-Interpretation:
-
-The upper-right quadrant performs substantially better than the upper-left crop,
-but remains clearly below the centered L1 baseline.
-
-Decision:
-
-**REJECT center (2880,540).**
-
----
-
-## EXP-D038C — Fixed camera center (960,1620)
-
-Fixed:
-
-- model: D032A YOLO11n
-- confidence: 0.001
-- NMS IoU: 0.70
-- imgsz: 960
-- AWS Stockholm direct endpoint
-
-Changed:
-
-- fixed L1 camera center: `(960,1620)`
-
-Remote validation:
-
-- score: **0.0853058453**
-- coverage: **249 / 249**
-- missing frames: none
-- median endpoint latency: **98.2 ms**
-- max endpoint latency: **138.4 ms**
-- errors: none
-
-Interpretation:
-
-The lower-left quadrant contains substantially less useful target content than
-the centered L1 view.
-
-Decision:
-
-**REJECT center (960,1620).**
-
----
-
-## EXP-D038D — Fixed camera center (2880,1620)
-
-Fixed:
-
-- model: D032A YOLO11n
-- confidence: 0.001
-- NMS IoU: 0.70
-- imgsz: 960
-- AWS Stockholm direct endpoint
-
-Changed:
-
-- fixed L1 camera center: `(2880,1620)`
-
-Remote validation:
-
-- score: **0.1110578391**
-- coverage: **249 / 249**
-- missing frames: none
-- median endpoint latency: **99.3 ms**
-- max endpoint latency: **115.3 ms**
-- errors: none
-
-Interpretation:
-
-The lower-right quadrant performs better than the two left-side quadrants, but
-substantially worse than the centered L1 crop.
-
-Decision:
-
-**REJECT center (2880,1620).**
-
-## Coarse camera sweep conclusion
-
-The centered L1 view is decisively superior to all four quadrant centers.
-
-Results:
-
-- `(1920,1080)` -> **~0.165 best**
-- `(2880,540)` -> 0.1469
-- `(2880,1620)` -> 0.1111
-- `(960,540)` -> 0.0883
-- `(960,1620)` -> 0.0853
-
-Therefore subsequent camera optimization should remain near the centered view.
-
----
-
-## EXP-D038E — Local camera shift (2240,1080)
-
-Fixed:
-
-- model: D032A YOLO11n
-- confidence: 0.001
-- NMS IoU: 0.70
-- imgsz: 960
-- AWS Stockholm direct endpoint
-
-Changed:
-
-- fixed L1 center: `(2240,1080)`
-
-Remote validation:
-
-- score: **0.1367130476**
-- coverage: **246 / 249**
-- missing frames: `[32, 111, 113]`
-- median endpoint latency: **102.4 ms**
-- max endpoint latency: **112.4 ms**
-- errors: none
-
-Decision:
-
-**REJECT (2240,1080).**
-
----
-
-# EXP-D039A — Increased inference resolution to 1280
+**Date:** 2026-09-18
 
 ## Hypothesis
 
-The competition contains many small targets, and the production YOLO11n model
-still has substantial realtime compute headroom on the AWS deployment.
+A different fixed L1 crop may expose more useful target content than the centered view.
 
-Increasing inference resolution from 960 to 1280 may improve small-object
-localization and recall while remaining below the 333 ms frame interval.
+## Results
 
-## Local AWS benchmark
+| L1 center | Remote score |
+|---|---:|
+| `(1920,1080)` | **0.16407 / 0.16604** |
+| `(2880,540)` | 0.146887 |
+| `(2240,1080)` | 0.136713 |
+| `(2880,1620)` | 0.111058 |
+| `(960,540)` | 0.088297 |
+| `(960,1620)` | 0.085306 |
 
-YOLO11n @ imgsz=1280:
+All major off-center runs had near-perfect frame delivery.
 
-- mean: 175.8 ms
-- median: 176.3 ms
-- p95: 182.8 ms
-- max: 183.7 ms
+## Interpretation
 
-This remains comfortably inside the realtime budget.
+The centered L1 view is decisively superior.
+
+The score losses are spatial-content effects, not transport artifacts.
 
 ## Decision
 
-Proceed to remote validation with all other production parameters frozen.
+**KEEP fixed center `(1920,1080)`**
+
+Stop broad camera-center search.
 
 ---
 
-## Remote validation
+# EXP-D039 — Increased inference resolution
 
-Fixed:
+**Status:** COMPLETE
 
-- model: D032A YOLO11n
-- confidence: 0.001
-- NMS IoU: 0.70
-- camera: fixed centered L1 `(1920,1080)`
-- AWS Stockholm direct endpoint
+**Date:** 2026-09-18
 
-Changed:
+## Hypothesis
 
-- inference image size: 960 -> 1280
+Increasing inference resolution from 960 to 1280 may improve small-object localization while remaining inside the realtime budget.
 
-### CPU benchmark
+## AWS benchmark at imgsz=1280
 
 - mean: 175.8 ms
 - median: 176.3 ms
 - p95: 182.8 ms
 - max: 183.7 ms
 
-### Remote validation
+## Remote validation
 
 - score: **0.1491883519**
-- coverage: **248 / 249**
-- missing frame: `[1]`
-- median endpoint latency: **200.5 ms**
-- max endpoint latency: **220.7 ms**
-- errors: none
+- coverage: 248 / 249
+- median endpoint latency: 200.5 ms
+- max endpoint latency: 220.7 ms
 
-### Interpretation
+## Interpretation
 
-The increased resolution remained comfortably within the realtime budget, but
-hidden-validation performance decreased substantially.
+The larger inference scale remained realtime-safe but substantially reduced validation score.
 
-Therefore inference resolution rather than latency caused the regression.
+This is therefore a model-scale/generalization regression rather than a latency problem.
 
-The detector appears better calibrated to its original 960-pixel training/inference
-scale.
+## Decision
 
-### Decision
-
-**REJECT imgsz=1280.**
+**REJECT imgsz=1280**
 
 Restore:
 
@@ -5210,150 +4011,85 @@ Restore:
 
 ---
 
-# EXP-D040 — Multi-seed YOLO11n experiment
+# EXP-D040 — Multi-seed YOLO11n training
 
-## EXP-D040A — YOLO11n seed 7
+**Status:** COMPLETE
 
-Fixed deployment:
+**Date:** 2026-09-18
 
-- AWS Stockholm direct endpoint
-- confidence: 0.001
-- NMS IoU: 0.70
-- imgsz: 960
-- camera: fixed centered L1 `(1920,1080)`
+## Hypothesis
 
-Changed:
+With only 115 real-domain boxes, random initialization / augmentation order may materially affect hidden-domain generalization.
 
-- model training seed: 42 -> 7
+## Seeds trained
 
-Remote validation:
+- 7
+- 21
+- 1337
 
-- score: **0.1720154731**
-- coverage: **249 / 249**
-- missing frames: none
-- median endpoint latency: **124.8 ms**
-- max endpoint latency: **180.1 ms**
-- errors: none
+Original baseline:
 
-Comparison:
+- 42
 
-- seed 42 run 1: 0.1640706308
-- seed 42 run 2: 0.1660387593
-- seed 42 mean: ~0.16505
-- seed 7: **0.1720154731**
+## Internal training metrics
 
-Interpretation:
+| Seed | mAP@0.50 | mAP@0.50:0.95 |
+|---:|---:|---:|
+| 7 | 0.9663 | **0.8012** |
+| 21 | 0.9653 | 0.7998 |
+| 1337 | **0.9689** | 0.7933 |
+| 42 | ~0.9670 | ~0.7980 |
+
+## Remote validation
+
+| Seed | Score |
+|---:|---:|
+| 42 | ~0.16505 mean |
+| 1337 | 0.1715091434 |
+| 7 | 0.1720154731 |
+| **21** | **0.1736260883** |
+
+All three new-seed runs achieved essentially complete frame delivery.
+
+## Interpretation
 
 Training-seed variance materially affects hidden-validation performance.
 
-Seed 7 generalizes better than the original seed-42 production detector while
-remaining comfortably inside the realtime latency budget.
+Seed 21 generalizes best despite not having the strongest internal mAP metric.
 
-Decision:
+This again confirms that internal resubstitution metrics are insufficient for final model selection.
 
-**KEEP seed 7 as the new production baseline.**
+## Decision
 
-## EXP-D040B — YOLO11n seed 21
-
-Fixed deployment:
-
-- AWS Stockholm direct endpoint
-- confidence: 0.001
-- NMS IoU: 0.70
-- imgsz: 960
-- camera: fixed centered L1 `(1920,1080)`
-
-Changed:
-
-- model training seed: 7 -> 21
-
-Remote validation:
-
-- score: **0.1736260883**
-- coverage: **249 / 249**
-- missing frames: none
-- median endpoint latency: **127.5 ms**
-- max endpoint latency: **137.3 ms**
-- errors: none
-
-Comparison:
-
-- seed 42 mean: ~0.16505
-- seed 7: 0.1720154731
-- seed 21: **0.1736260883**
-
-Interpretation:
-
-Seed 21 slightly outperforms seed 7 and is the strongest single-model detector tested so far.
-
-Decision:
-
-**KEEP seed 21 as the new production baseline.**
-
-## EXP-D040C — YOLO11n seed 1337
-
-Fixed deployment:
-
-- AWS Stockholm direct endpoint
-- confidence: 0.001
-- NMS IoU: 0.70
-- imgsz: 960
-- camera: fixed centered L1 `(1920,1080)`
-
-Changed:
-
-- model training seed: 21 -> 1337
-
-Remote validation:
-
-- score: **0.1715091434**
-- coverage: **249 / 249**
-- missing frames: none
-- median endpoint latency: **122.3 ms**
-- max endpoint latency: **142.0 ms**
-- errors: none
-
-Comparison:
-
-- seed 42 mean: ~0.16505
-- seed 1337: 0.1715091434
-- seed 7: 0.1720154731
-- seed 21: **0.1736260883**
-
-## D040 conclusion
-
-Training-seed diversity materially affects hidden-validation performance.
-
-Ranking:
-
-1. seed 21 — **0.1736260883**
-2. seed 7 — 0.1720154731
-3. seed 1337 — 0.1715091434
-4. seed 42 — ~0.16505 mean
-
-Decision:
-
-**KEEP seed 21 as the strongest single-model production detector.**
+**KEEP seed 21 as strongest single-model detector.**
 
 ---
 
-# EXP-D041 — Two-model YOLO11n ensemble
+# EXP-D041 — Seed 21 + seed 7 ensemble
 
-## EXP-D041A — Seed 21 + seed 7 ensemble
+**Status:** COMPLETE
 
-Configuration:
+**Date:** 2026-09-18
 
-- models:
-  - seed 21
-  - seed 7
+## Hypothesis
+
+The two strongest independently trained YOLO11n models may make complementary errors.
+
+Combining their detections and suppressing same-class duplicates may improve hidden-validation performance.
+
+## Models
+
+- seed 21
+- seed 7
+
+## Initial ensemble
+
 - confidence: 0.001
 - per-model NMS IoU: 0.70
-- ensemble NMS IoU: 0.55
+- ensemble class-aware NMS IoU: 0.55
 - imgsz: 960
-- camera: fixed centered L1 `(1920,1080)`
-- AWS Stockholm direct endpoint
 
-AWS benchmark:
+AWS CPU benchmark:
 
 - mean: 231.5 ms
 - median: 233.0 ms
@@ -5362,125 +4098,51 @@ AWS benchmark:
 
 Remote validation:
 
-- run 1: **0.17394739189505498**
-- run 2: **0.17394739189505498**
-- errors: none
+- run 1: **0.1739473919**
+- run 2: **0.1739473919**
 
-Comparison:
+The repeated run produced the exact same score to displayed precision.
 
-- seed 21 single: 0.1736260883
-- seed 21 + seed 7 ensemble: **0.1739473919**
+## Ensemble NMS sweep
 
-Interpretation:
+### 0.55
 
-The two strongest independently trained YOLO11n models make sufficiently
-complementary predictions to slightly improve hidden-validation performance
-when combined.
+- score: 0.1739473919
 
-### Reproducibility
+### 0.65
 
-The identical ensemble configuration was validated a second time without restarting
-or modifying the endpoint.
+- score: **0.1752288579**
 
-Results:
+### 0.75
 
-- run 1: **0.17394739189505498**
-- run 2: **0.17394739189505498**
+- score: 0.1738262207
+- coverage: 248 / 249
+- median endpoint latency: 281.4 ms
+- max: 493.7 ms
 
-The scores were identical to the displayed precision.
+## Interpretation
 
-This demonstrates that the AWS-hosted validation is effectively deterministic under
-a fixed model/runtime configuration.
+The two-model ensemble improves over the strongest individual seed.
 
-Therefore the improvement over the seed-21 single model is attributable to the
-ensemble rather than validation noise.
+An ensemble NMS threshold of 0.65 preserves useful complementary detections better than 0.55 while avoiding the excess duplicate load seen at 0.75.
 
 ## Decision
 
-**KEEP D041A as the new production baseline.**
+**KEEP D041B**
 
-Current best score:
+Production ensemble:
 
-**0.1739473919**
-
-## EXP-D041B — Ensemble NMS IoU 0.65
-
-Fixed:
-
-- models:
-  - seed 21
-  - seed 7
+- seed 21 + seed 7
 - confidence: 0.001
-- per-model NMS IoU: 0.70
+- per-model NMS: 0.70
+- ensemble NMS: **0.65**
 - imgsz: 960
-- camera: fixed centered L1 `(1920,1080)`
-- AWS Stockholm direct endpoint
+- center: `(1920,1080)`
 
-Changed:
+Best remote score:
 
-- ensemble NMS IoU: 0.55 -> 0.65
+**0.1752288579**
 
-Remote validation:
-
-- score: **0.1752288579**
-- errors: none
-
-Comparison:
-
-- seed 21 single: 0.1736260883
-- ensemble NMS 0.55: 0.1739473919
-- ensemble NMS 0.65: **0.1752288579**
-
-Interpretation:
-
-A less aggressive cross-model suppression threshold preserves useful complementary
-detections from seed 21 and seed 7.
-
-Decision:
-
-**KEEP ensemble NMS IoU 0.65 as the new production baseline.**
-
-## EXP-D041C — Ensemble NMS IoU 0.75
-
-Fixed:
-
-- seed 21 + seed 7 ensemble
-- confidence: 0.001
-- per-model NMS IoU: 0.70
-- imgsz: 960
-- fixed centered L1 `(1920,1080)`
-- AWS Stockholm direct endpoint
-
-Changed:
-
-- ensemble NMS IoU: 0.65 -> 0.75
-
-Remote validation:
-
-- score: **0.1738262207**
-- coverage: **248 / 249**
-- missing frame: `[185]`
-- median endpoint latency: **281.4 ms**
-- max endpoint latency: **493.7 ms**
-- errors: none
-
-Comparison:
-
-- ensemble NMS 0.55: 0.1739473919
-- ensemble NMS 0.65: **0.1752288579**
-- ensemble NMS 0.75: 0.1738262207
-
-Interpretation:
-
-Increasing cross-model NMS to 0.75 retains too many overlapping detections and
-reduces validation performance.
-
-The configuration also approaches/exceeds the realtime frame budget on some
-requests.
-
-Decision:
-
-**REJECT 0.75. KEEP 0.65 AS CURRENT BEST.**
 ---
 
 # EXP-D042 — Direct Windows GTX 1060 deployment
@@ -5491,67 +4153,47 @@ Decision:
 
 ## Hypothesis
 
-A directly exposed Windows GPU endpoint can preserve the near-complete frame
-delivery achieved by AWS while reducing inference latency enough to enable more
-expensive ensemble experiments.
+A directly exposed home Windows endpoint may preserve near-complete frame delivery while providing substantially faster CUDA inference than the AWS CPU instance.
 
 ## Hardware
 
-- Windows PC
 - NVIDIA GeForce GTX 1060 6 GB
 - PyTorch 2.14.0 + CUDA 12.6
 - direct public IPv4
 - no ngrok
 
-## Model
+## D041B local GPU benchmark
 
-D041B production ensemble:
+Seed 21 + seed 7 ensemble:
 
-- seed 21
-- seed 7
-- confidence: 0.001
-- per-model NMS IoU: 0.70
-- ensemble NMS IoU: 0.65
-- imgsz: 960
-- camera: centered L1 `(1920,1080)`
-
-## Local GPU benchmark
-
-Two-model ensemble:
-
-- mean: **22.2 ms**
-- median: **22.0 ms**
-- p95: **23.9 ms**
-- max: **24.5 ms**
+- mean: 22.2 ms
+- median: 22.0 ms
+- p95: 23.9 ms
+- max: 24.5 ms
 
 ## Remote validation
 
-- score: **0.17509221176214626**
+- score: **0.1750922118**
 - coverage: **248 / 249**
 - missing frame: `[150]`
 - median endpoint latency: **47.4 ms**
 - max endpoint latency: **182.3 ms**
-- errors: none
 
 AWS reference:
 
-- score: **0.17522885788304102**
+- score: 0.1752288579
 
 ## Interpretation
 
-The Windows endpoint is effectively score-equivalent to AWS while providing
-dramatically lower inference latency.
+Windows direct hosting is effectively score-equivalent to AWS while providing dramatically lower runtime latency and much more compute headroom.
 
-The deployment preserves almost complete request coverage and removes compute
-as the primary runtime constraint.
+This makes Windows the preferred platform for compute-heavy experimentation.
 
-This provides enough headroom for larger ensembles and more sophisticated fusion.
+AWS remains the strongest validated reference deployment.
 
 ## Decision
 
 **KEEP Windows direct as primary experimentation platform.**
-
-Retain AWS as the strongest clean reference deployment.
 
 ---
 
@@ -5587,7 +4229,7 @@ Runtime:
 
 ## Remote validation
 
-- score: **0.17392192902098935**
+- score: **0.1739219290**
 - coverage: **247 / 249**
 - missing frames: `[105, 106]`
 - median endpoint latency: **61.8 ms**
@@ -5604,11 +4246,1551 @@ Runtime:
 
 Adding seed 1337 does not improve hidden-validation performance.
 
-The third model likely contributes enough weaker or redundant predictions to offset
-any benefit from additional model diversity.
+The third model likely contributes enough weaker or redundant predictions to offset any benefit from additional diversity.
 
 ## Decision
 
 **REJECT the 3-model ensemble.**
 
 Retain seed 21 + seed 7 with ensemble NMS 0.65 as the current best.
+# EXP-D044A — Score-weighted box fusion
+
+**Status:** COMPLETE
+
+**Date:** 2026-09-18
+
+## Hypothesis
+
+The seed-21 + seed-7 ensemble may benefit from averaging overlapping same-class
+boxes rather than keeping only the highest-confidence prediction.
+
+## Change
+
+Replaced hard cross-model class-aware NMS with score-weighted coordinate fusion.
+
+Fixed:
+
+- seed 21 + seed 7
+- confidence: 0.001
+- per-model NMS IoU: 0.70
+- fusion IoU: 0.65
+- imgsz: 960
+- camera: centered L1 `(1920,1080)`
+- Windows GTX 1060 direct endpoint
+
+## Local benchmark
+
+- mean: 23.2 ms
+- median: 23.3 ms
+- p95: 25.3 ms
+- max: 25.8 ms
+
+## Remote validation
+
+- score: **0.1748360702**
+- coverage: **248 / 249**
+- missing frame: `[1]`
+- median endpoint latency: **57.5 ms**
+- max endpoint latency: **141.8 ms**
+- errors: none
+
+## Comparison
+
+- hard NMS ensemble: **0.1752288579**
+- weighted box fusion: 0.1748360702
+
+## Interpretation
+
+Weighted coordinate averaging slightly reduces hidden-validation performance.
+
+The two models are complementary, but when both predict the same object the
+higher-confidence box is often better localized than the averaged box.
+
+## Decision
+
+**REJECT WBF.**
+
+Restore D041B hard class-aware NMS at ensemble IoU 0.65.
+
+---
+
+
+# EXP-D045 — Real + synthetic model / missing-class specialist
+
+## EXP-D045B — Seed-21 real + synthetic model
+
+Checkpoint:
+
+`drone/artifacts/exp_d045b/runs/seed21_real_plus_synth_v1-2/weights/best.pt`
+
+Local validation:
+
+- images: `2970`
+- instances: `3350`
+- overall precision: `0.843`
+- recall: `0.930`
+- mAP50: `0.876`
+- mAP50-95: `0.762`
+
+Selected class results included:
+
+- condor mAP50: `0.941`
+- helicopter mAP50: `0.880`
+- jammer mAP50: `0.935`
+- mine_roller mAP50: `0.970`
+- spacecraft mAP50: `0.955`
+- tank mAP50: `0.791`
+
+### Remote single-model test
+
+The runtime was temporarily configured with the same D045B checkpoint in both ensemble slots.
+
+Remote result:
+
+- score: `0.1302117671`
+- errors: none
+- remote requests: `249/249`
+- median latency: `46.6 ms`
+- max latency: `107.3 ms`
+
+### Interpretation
+
+Strong local validation did not transfer to the hidden remote sequence.
+
+The original D040 ensemble remained substantially stronger remotely.
+
+### Decision
+
+Do not replace D041B with D045B as the main detector.
+
+---
+
+## EXP-D045C — Missing-class specialist integration
+
+A specialist detector was added for classes believed to be underrepresented:
+
+- `condor`
+- `jammer`
+- `small_launcher`
+- `spacecraft`
+- `ta-ta`
+
+The specialist replaced baseline predictions for the target class set.
+
+### Remote tests
+
+Initial specialist integration:
+
+- score: `0.1745149012`
+- telemetry: `248/249`
+- median latency: `60.7 ms`
+- max latency: `171.5 ms`
+
+Specialist threshold variant:
+
+- score: `0.1650766644`
+- telemetry: `230/249`
+- missing: `19`
+- median latency: `62.7 ms`
+
+Specialist confidence `0.05`:
+
+- score: `0.1752240687`
+- telemetry: `247/249`
+- missing: `2`
+- median latency: `56.4 ms`
+- max latency: `200.8 ms`
+
+### Interpretation
+
+The specialist did not produce a clear reproducible gain over D041B.
+
+Later inspection of the real validation imagery suggested that the supposedly missing classes might not occur in this sequence at all.
+
+### Decision
+
+Do not rely on the missing-class specialist as the main improvement path.
+
+---
+
+# EXP-D047 — Real-domain pseudo-label mining
+
+## EXP-D047A — Two-model agreement mining
+
+The D040 seed-21 and seed-7 models were run independently over the captured L1 frames.
+
+Input:
+
+- L1 frames: `194`
+
+Mining output:
+
+- total agreements: `970`
+- strong agreements: `248`
+- disagreements: `4706`
+- review candidates: `548`
+
+Strong-agreement class counts:
+
+- hangar: `11`
+- helicopter: `16`
+- jet_plane: `15`
+- large_launcher: `7`
+- large_tower: `35`
+- medium_launcher: `8`
+- medium_plane: `19`
+- mine_roller: `11`
+- small_plane: `46`
+- small_tower: `15`
+- tank: `65`
+
+Agreement statistics:
+
+- median minimum confidence: `0.8371`
+- minimum minimum-confidence: `0.0201`
+- maximum minimum-confidence: `0.9947`
+- median IoU: `0.9102`
+- IoU range: `0.6020–0.9783`
+
+Threshold study:
+
+- conf >= `0.5`, IoU >= `0.75`: `160`
+- conf >= `0.7`, IoU >= `0.80`: `147`
+- conf >= `0.8`, IoU >= `0.85`: `128`
+- conf >= `0.9`, IoU >= `0.90`: `64`
+
+Balanced selection at conf >= `0.70`, IoU >= `0.80`:
+
+- selected: `105`
+
+Class distribution:
+
+- hangar: `3`
+- helicopter: `10`
+- jet_plane: `8`
+- large_launcher: `6`
+- large_tower: `12`
+- medium_launcher: `5`
+- medium_plane: `8`
+- mine_roller: `10`
+- small_plane: `12`
+- small_tower: `11`
+- tank: `20`
+
+---
+
+## EXP-D047B — Pseudo-labeled real-domain dataset
+
+Dataset build result:
+
+- new D047 images: `83`
+- new D047 boxes: `105`
+- total images: `160`
+- total label files: `160`
+- total boxes: `220`
+
+Class counts:
+
+- hangar: `8`
+- helicopter: `19`
+- jet_plane: `14`
+- large_launcher: `10`
+- large_tower: `29`
+- medium_launcher: `8`
+- medium_plane: `12`
+- mine_roller: `15`
+- small_plane: `29`
+- small_tower: `23`
+- tank: `53`
+
+---
+
+## EXP-D047C — Retraining on mined real-domain dataset
+
+Training performed on Linux GTX 1060 3 GB.
+
+Example seed-7 local validation:
+
+- images: `160`
+- instances: `220`
+- precision: `0.969`
+- recall: `0.927`
+- mAP50: `0.969`
+- mAP50-95: `0.840`
+
+Selected class mAP50-95:
+
+- hangar: `0.893`
+- helicopter: `0.909`
+- jet_plane: `0.813`
+- large_launcher: `0.902`
+- large_tower: `0.866`
+- medium_launcher: `0.886`
+- medium_plane: `0.858`
+- mine_roller: `0.894`
+- small_plane: `0.622`
+- small_tower: `0.770`
+- tank: `0.824`
+
+### Remote result
+
+D047C single-model remote score:
+
+- `0.1595087503`
+
+Telemetry:
+
+- `238/249`
+- missing: `11`
+- median latency: `50.8 ms`
+- max latency: `144.2 ms`
+
+### Interpretation
+
+Excellent local validation again failed to translate into remote score.
+
+Pseudo-label agreement training was not enough to beat D041B.
+
+### Decision
+
+Reject D047C as production replacement.
+
+---
+
+# EXP-D048 — Manual disagreement mining
+
+## EXP-D048A — Hard-disagreement review
+
+Initial selection:
+
+- selected: `19`
+
+Class counts:
+
+- hangar: `2`
+- jet_plane: `1`
+- large_tower: `2`
+- medium_launcher: `1`
+- medium_plane: `2`
+- mine_roller: `1`
+- small_plane: `4`
+- small_tower: `2`
+- tank: `4`
+
+By source:
+
+- seed21_only: `7`
+- seed7_only: `12`
+
+After lowering minimum score to `0.03`:
+
+- selected: `46`
+
+Class counts:
+
+- hangar: `4`
+- helicopter: `2`
+- jet_plane: `3`
+- large_launcher: `1`
+- large_tower: `4`
+- medium_launcher: `2`
+- medium_plane: `4`
+- mine_roller: `4`
+- small_plane: `9`
+- small_tower: `5`
+- tank: `8`
+
+By source:
+
+- seed21_only: `23`
+- seed7_only: `23`
+
+Manual review accepted `31` candidates.
+
+---
+
+## EXP-D048B — Expanded manually verified dataset
+
+Build result:
+
+- accepted D048 candidates: `31`
+- actually added: `27`
+- duplicate skips: `4`
+- new frames copied: `11`
+- total images: `171`
+- total boxes: `247`
+
+---
+
+## EXP-D048C — Retraining on disagreement-enriched dataset
+
+Seed-21 local validation:
+
+- images: `171`
+- instances: `247`
+- precision: `0.975`
+- recall: `0.904`
+- mAP50: `0.961`
+- mAP50-95: `0.817`
+
+Selected class mAP50-95:
+
+- hangar: `0.880`
+- helicopter: `0.878`
+- jet_plane: `0.761`
+- large_launcher: `0.917`
+- large_tower: `0.840`
+- medium_launcher: `0.882`
+- medium_plane: `0.810`
+- mine_roller: `0.902`
+- small_plane: `0.585`
+- small_tower: `0.693`
+- tank: `0.844`
+
+### Interpretation
+
+Manual disagreement labeling improved the real-domain dataset quality but did not expose a clear route toward the leaderboard gap.
+
+---
+
+# EXP-D049 — Exhaustive L1 visual review
+
+All `194` captured L1 frames were split into quadrants for manual inspection.
+
+Generated:
+
+- L1 frames: `194`
+- detail tiles: `776`
+- sheets: `194`
+
+Output:
+
+`drone/artifacts/exp_d049/quadrant_sheets`
+
+### Purpose
+
+Search manually for classes not represented in the mined real-domain dataset, especially:
+
+- condor
+- jammer
+- small_launcher
+- spacecraft
+- ta-ta
+
+### Observation
+
+Extensive manual review did not reveal convincing examples of these missing classes.
+
+### Interpretation
+
+The working assumption that these classes were “missing because the detector had not learned them” became increasingly doubtful.
+
+They may simply not occur in the sampled validation sequence.
+
+---
+
+# EXP-D050 — Missing-class specialist scan
+
+The D045 specialist was run across the captured real validation frames specifically to propose:
+
+- condor
+- jammer
+- small_launcher
+- spacecraft
+- ta-ta
+
+### Result
+
+Contact-sheet review showed that the proposals were overwhelmingly false positives.
+
+The specialist frequently mapped ordinary terrain, buildings, vegetation, or image artifacts to the supposedly missing classes.
+
+### Interpretation
+
+This strongly suggested that forcing the five missing classes into the real-domain dataset was harmful.
+
+### Decision
+
+Stop pseudo-labeling or synthetically forcing these classes without clear visual evidence.
+
+---
+
+# EXP-D050B — Class suppression test
+
+The following classes were suppressed at runtime:
+
+- condor
+- jammer
+- small_launcher
+- spacecraft
+- ta-ta
+
+Baseline detector remained:
+
+- D040 seed 21 + seed 7
+- confidence `0.001`
+- model NMS `0.70`
+- ensemble NMS `0.65`
+- imgsz `960`
+
+Remote runs:
+
+### Run 1
+
+- score: `0.1717109464`
+- received: `242/249`
+- missing: `7`
+- median latency: `81.1 ms`
+
+### Run 2
+
+- score: `0.1752366674`
+- received: `248/249`
+- missing: `1`
+- median latency: `79.4 ms`
+
+### Run 3
+
+- score: `0.1738982910`
+- received: `247/249`
+- missing: `2`
+- median latency: `80.6 ms`
+
+### Interpretation
+
+The apparent `0.1752367` improvement was not reproducible.
+
+The filtered runs averaged below the original D041B baseline.
+
+### Decision
+
+Reject class suppression as a meaningful gain.
+
+Restore D041B.
+
+---
+
+# EXP-D051 — Active camera investigation
+
+## EXP-D051A — L1 target-following
+
+Instead of fixed centered L1, the camera attempted to move within L1 toward small/high-confidence detections.
+
+Remote score:
+
+- `0.1784109350`
+
+This became the highest observed score during this sequence of experiments.
+
+### Important caveat
+
+Log inspection showed that the camera largely remained at centered L1, so the score increase could not confidently be attributed to the targeting policy itself.
+
+### Decision
+
+Preserve the configuration as a useful checkpoint, but do not interpret the gain as proof of successful camera tracking.
+
+---
+
+# EXP-D052 — L2 active zoom investigation
+
+## EXP-D052A — L1 detection → L2 target zoom
+
+Camera constraints were re-examined.
+
+Key discovery:
+
+- from L0, allowed levels: `[0, 1]`
+- from L1, allowed levels: `[0, 1, 2]`
+
+Therefore L2 was legal when requested from L1.
+
+### First L2 attempt
+
+The camera successfully entered L2 on a high-confidence `mine_roller`.
+
+Example:
+
+- class: `mine_roller`
+- confidence: approximately `0.894–0.916`
+- L2 center around `(1974,1303)`
+
+However, the runtime attempted an invalid L2 → L0 reset.
+
+The evaluator ignored the reset, leaving the camera stuck at the same L2 crop for nearly the entire sequence.
+
+Remote score:
+
+- `0.0122286713`
+
+### Interpretation
+
+This was a camera-state bug, not evidence that L2 itself was inherently bad.
+
+---
+
+## EXP-D052B — L2 → L1 reset
+
+The reset path was corrected to:
+
+`L2 -> L1`
+
+instead of:
+
+`L2 -> L0`
+
+Remote score:
+
+- `0.03585007345`
+
+Errors showed movement-limit violations:
+
+example:
+
+`551.24 px exceeds the L2 limit of 551.00 px`
+
+### Interpretation
+
+Rounding at the exact movement boundary caused otherwise valid reset commands to be rejected.
+
+---
+
+## EXP-D052C — L2 movement safety margin
+
+A small safety margin was added below the movement limit.
+
+Later remote result:
+
+- score: `0.1209545109`
+- received: `233/249`
+- missing: `16`
+- median latency: `79.4 ms`
+- max latency: `176.5 ms`
+
+Camera errors still occurred on several L2 → L1 transitions, including movement distances around:
+
+- `608.04 px`
+- `558.92 px`
+- `636.95 px`
+- `654.28 px`
+- `552.15 px`
+- `587.59 px`
+- `584.58 px`
+
+### Interpretation
+
+The L2 camera controller remained unreliable and materially reduced evaluation coverage and score.
+
+### Decision
+
+Pause active-L2 work.
+
+Return focus to detector/post-processing and captured validation analysis.
+
+---
+
+# EXP-D053 — Hidden-validation capture and post-processing analysis
+
+## EXP-D053A — Capture actual evaluator imagery
+
+The stable centered-L1 predictor was restored.
+
+Validation requests were captured locally using the existing `capture_request()` infrastructure.
+
+Captured sequence:
+
+`drone/captures/ed590596961d4390b6919a7633824f6b`
+
+Captured:
+
+- `230` PNG images
+- `230` frame metadata JSON files
+- `230` prediction JSON files
+
+Remote score during capture run:
+
+- `0.1578304149`
+- received: `230/249`
+- missing: `19`
+- median latency: `82.5 ms`
+- max latency: `202.1 ms`
+
+Medical training was running concurrently on the Windows machine, so this score was considered confounded by compute contention and capture I/O.
+
+### Decision
+
+Use this attempt as a data-acquisition run, not as a model-quality result.
+
+---
+
+## EXP-D053B — Manual validation review
+
+A review generator was created:
+
+`drone/scripts/make_validation_review.py`
+
+It projected the model's global normalized predictions back onto the received validation crops and generated contact sheets.
+
+### Major observation
+
+At the existing production confidence:
+
+`CONFIDENCE = 0.001`
+
+the detector produced massive amounts of low-confidence clutter:
+
+- false positives on trees
+- false positives on roads
+- false positives on water
+- giant hangar-like boxes
+- repeated overlapping detections
+- many predictions displayed near confidence `0.00`
+
+The captured frames nevertheless also showed strong, temporally persistent high-confidence detections.
+
+---
+
+## EXP-D053C — Confidence distribution analysis
+
+Across `230` captured prediction files:
+
+| Confidence threshold | Total predictions | Average/frame |
+|---|---:|---:|
+| 0.001 | 7715 | 33.5 |
+| 0.005 | 1538 | 6.7 |
+| 0.010 | 958 | 4.2 |
+| 0.020 | 646 | 2.8 |
+| 0.030 | 532 | 2.3 |
+| 0.050 | 439 | 1.9 |
+| 0.080 | 386 | 1.7 |
+| 0.100 | 357 | 1.6 |
+| 0.150 | 322 | 1.4 |
+| 0.200 | 301 | 1.3 |
+
+### Interpretation
+
+The production threshold `0.001` appears far too permissive for the hidden validation domain.
+
+Raising the threshold from `0.001` to `0.03` removes more than 90% of returned boxes while preserving many strong temporally stable tracks.
+
+---
+
+## EXP-D053D — High-confidence track inspection
+
+A survivor dump was generated for detections with confidence >= `0.020`.
+
+Several strong persistent tracks were observed:
+
+- `mine_roller` around frames 3–9:
+  - approximately `0.43–0.99`
+- `tank` around frames 25–40:
+  - approximately `0.85–0.98`
+- `helicopter` around frames 52–64:
+  - approximately `0.90–0.99`
+- `hangar` around frames 65–76:
+  - approximately `0.85–0.99`
+- `medium_plane` around frames 70–82:
+  - approximately `0.92–0.99`
+- `tank` around frames 84–91:
+  - approximately `0.89–0.99`
+- `helicopter` around frames 93–108:
+  - approximately `0.97–0.997`
+- `medium_launcher` and `large_tower` around frames 102–116:
+  - often `0.85–0.98`
+- `small_plane` / `jet_plane` / `hangar` around frames 119–135:
+  - many detections `0.9–0.99`
+- `tank` around frames 139–152:
+  - approximately `0.83–0.99`
+- `small_tower` around frames 166–180:
+  - approximately `0.96–0.99`
+- `tank` around frames 192–207:
+  - approximately `0.85–0.95`
+- `large_launcher` around frames 205–219:
+  - approximately `0.96–0.999`
+
+At the same time, many secondary detections around these tracks remained in the `0.020–0.050` range.
+
+### Interpretation
+
+The hidden-domain detector appears substantially better than the raw `0.001` output initially suggested.
+
+Strong real-looking tracks are often extremely confident.
+
+The main current failure mode is likely overly permissive post-processing rather than complete detector failure.
+
+---
+
+# EXP-D053E — Planned clean confidence ablation
+
+Next planned experiment:
+
+Change only:
+
+`CONFIDENCE = 0.001 -> 0.030`
+
+Keep fixed:
+
+- D040 seed 21 + seed 7
+- `MODEL_NMS_IOU = 0.70`
+- `ENSEMBLE_NMS_IOU = 0.65`
+- `IMAGE_SIZE = 960`
+- stable centered L1 camera
+- no validation capture
+- no concurrent Medical training if possible
+
+### Purpose
+
+Measure the causal effect of global confidence filtering without confounding it with:
+
+- NMS changes
+- class suppression
+- camera changes
+- capture I/O
+- synthetic specialist logic
+
+### Follow-up plan
+
+If `0.030` improves remote score:
+
+1. test `0.050`
+2. then tune ensemble NMS separately
+
+If `0.030` is neutral:
+
+1. test `0.020`
+
+If `0.030` significantly worsens:
+
+1. explore `0.010–0.020`
+
+Class-specific thresholds should only be tested after establishing the best global confidence range.
+
+---
+
+## EXP-D054A — Quadrant-scanning camera policy
+
+**Status:** REJECTED
+
+### Goal
+
+Test whether poor remote performance was primarily caused by limited camera coverage.
+
+The stable D031 policy remained at centered L1 for nearly the whole sequence, covering only the central 1920x1080 source region.
+
+D054A instead cycled:
+
+L0 -> L1 quadrant -> L0 -> next L1 quadrant
+
+using the four legal L1 centers:
+
+- (960, 540)
+- (2880, 540)
+- (2880, 1620)
+- (960, 1620)
+
+The reset to L0 was used between quadrants to avoid L1->L1 movement races.
+
+### Configuration
+
+Detector unchanged from the old D041 baseline:
+
+- D040 seed21 + seed7
+- confidence: 0.001
+- model NMS IoU: 0.70
+- ensemble NMS IoU: 0.65
+- imgsz: 960
+
+### Remote result
+
+- score: `0.1093645809`
+- received: `247/249`
+- missing: `2`
+- median latency: `54.0 ms`
+- max latency: `155.0 ms`
+- errors: none
+
+### Interpretation
+
+Uniformly increasing spatial coverage strongly reduced score.
+
+The experiment was technically healthy, so the degradation was caused by the policy itself rather than transport or camera-command errors.
+
+Likely reasons:
+
+- too much time spent in L0 reset frames
+- reduced temporal coverage of useful centered-L1 targets
+- many quadrant views contained less useful signal than the center
+- coverage alone is not sufficient without temporal tracking
+
+### Decision
+
+Reject naive quadrant scanning.
+
+Return to stable centered L1.
+
+---
+
+## EXP-D054B — Invalid confidence-threshold run
+
+**Status:** INVALID / DO NOT INTERPRET
+
+### Goal
+
+Test `CONFIDENCE = 0.03`.
+
+### Remote result
+
+- score: `0.0960639318`
+- received: `248/249`
+- missing: `1`
+- median latency: `45.8 ms`
+- max latency: `181.7 ms`
+- errors: none
+
+### Problem
+
+The D054 quadrant-scanning predictor was accidentally still active.
+
+Final telemetry showed:
+
+`level=0 center=(1920,1080)`
+
+instead of the intended stable centered L1 policy.
+
+### Decision
+
+Do not use this score to judge confidence 0.03.
+
+---
+
+## EXP-D054C — Clean global confidence 0.03 baseline
+
+**Status:** COMPLETED
+
+### Goal
+
+Measure the effect of raising detector confidence from 0.001 to 0.03 with all other variables restored to the stable baseline.
+
+### Configuration
+
+Camera:
+
+- D031 stable centered L1
+- center: `(1920,1080)`
+
+Detector:
+
+- D040 seed21 + seed7
+- confidence: `0.03`
+- model NMS IoU: `0.70`
+- ensemble NMS IoU: `0.65`
+- imgsz: `960`
+
+No temporal tracker.
+
+### Remote result
+
+- score: `0.1585120505`
+- received: `236/249`
+- missing: `13`
+- median latency: `43.2 ms`
+- max latency: `140.3 ms`
+- errors: none
+- final camera: L1 `(1920,1080)`
+
+### Interpretation
+
+Raising the global threshold to 0.03 significantly reduced score versus the older ~0.175 baseline.
+
+Therefore the low-confidence tail is not purely harmful; some low-confidence predictions improve AP ranking / recall.
+
+### Decision
+
+Do not globally raise production confidence to 0.03.
+
+Use a lower detector threshold, but restrict which detections are allowed to enter temporal memory.
+
+---
+
+# EXP-D055 — Temporal object memory
+
+## EXP-D055A-v1 — Initial temporal tracker
+
+**Status:** REJECTED
+
+### Goal
+
+Add short-term temporal object memory on top of the stable centered-L1 detector.
+
+### Design
+
+- class-agnostic geometric association
+- per-track velocity estimate
+- confidence/class voting
+- short missed-frame persistence
+- current detections + memory detections
+- report-level duplicate suppression
+
+### Offline replay result
+
+Across 230 captured validation frames:
+
+- current detections: `532`
+- memory detections: `482`
+- final detections: `881`
+- frames with memory: `135`
+- avg current/frame: `2.313`
+- avg memory/frame: `2.096`
+- avg final/frame: `3.83`
+- max memory/frame: `11`
+- max final/frame: `19`
+
+### Failure mode
+
+The tracker accumulated ghost copies of the same object.
+
+Example:
+
+- one persistent tank detection gradually produced 4 extra remembered tank tracks
+
+### Decision
+
+Reject v1.
+
+Add stale-track suppression and stricter memory qualification.
+
+---
+
+## EXP-D055A-v2 — Conservative temporal memory
+
+**Status:** OFFLINE SUCCESS
+
+### Changes
+
+- require at least 3 hits before propagation
+- require a strong observation >= 0.60
+- max missed frames reduced to 3
+- faster confidence decay
+- kill unmatched tracks that overlap current detections
+- internal track deduplication
+
+### Offline replay result
+
+Across 230 captured validation frames:
+
+- current detections: `532`
+- memory detections: `23`
+- final detections before safe-merge fix: `431`
+- frames with memory: `18`
+- avg memory/frame: `0.10`
+- max memory/frame: `3`
+
+### New issue
+
+Class-agnostic final NMS removed too many legitimate current detections, especially crowded aircraft frames.
+
+### Decision
+
+Preserve all current detections.
+
+Allow memory only to supplement detector gaps.
+
+---
+
+## EXP-D055A-v3 — Safe supplemental memory
+
+**Status:** OFFLINE SUCCESS
+
+### Changes
+
+Current detector predictions are never removed by tracker post-processing.
+
+Memory is added only when it does not overlap an existing current detection.
+
+### Offline replay result
+
+Across 230 captured validation frames:
+
+- current detections: `532`
+- memory detections: `23`
+- final detections: `555`
+- frames with memory: `18`
+- avg current/frame: `2.313`
+- avg memory/frame: `0.100`
+- avg final/frame: `2.413`
+- max memory/frame: `3`
+- max final/frame: `18`
+
+Useful gap-filling examples included:
+
+- frame 137: current 0 -> memory 3
+- frames 181-183: current 0 -> memory 1
+- frame 222: current 0 -> memory 1
+- frame 224: current 0 -> memory 1
+
+### Interpretation
+
+Tracker now behaves as intended:
+
+- small number of additions
+- fills short detector gaps
+- does not multiply persistent objects
+- does not delete current detections
+
+---
+
+## EXP-D055B — Reproducibility confirmation
+
+- Best score: `0.1802420600`
+- Confirmation score: `0.1793168238`
+- Confirmation telemetry: `241/249`, 8 missing, median `44.5 ms`, max `145.0 ms`
+- Camera: stable L1 `(1920,1080)`
+- Tracker input threshold: `>= 0.03`
+- Decision: keep as stable known-good baseline.
+
+---
+
+## EXP-D055C — Longer temporal persistence
+
+**Status:** REJECTED
+
+Change:
+
+```python
+MAX_MISSED_FRAMES = 4
+```
+
+Remote results:
+
+- Run 1: `0.1752208183`, `239/249`, 10 missing
+- Run 2: `0.1779436307`, `242/249`, 7 missing
+
+Interpretation: extending persistence from 3 to 4 frames kept stale boxes alive too long and slightly hurt precision.
+
+Decision: restore `MAX_MISSED_FRAMES = 3`.
+
+---
+
+## EXP-D056A — Hard-negative/domain-adapted fine-tuning
+
+**Status:** TRAINED / NOT SELECTED FOR DEPLOYMENT
+
+### Goal
+
+Fine-tune D040 seed21 using a mixed dataset containing existing positives, manually verified real-domain examples, rare-class examples, and validation-domain hard negatives.
+
+### Dataset
+
+```text
+D032 positives:              77
+D048 real-domain positives: 171
+D045 selected positives:    600
+hard-negative images:        66
+Total:                      914
+```
+
+All 16 classes were represented. The 66 hard negatives had empty YOLO label files.
+
+Class counts:
+
+```text
+0  condor             117
+1  hangar              15
+2  helicopter          29
+3  jammer             110
+4  jet_plane           21
+5  large_launcher      15
+6  large_tower         46
+7  medium_launcher     12
+8  medium_plane        18
+9  mine_roller         21
+10 small_launcher     140
+11 small_plane         53
+12 small_tower         39
+13 spacecraft         108
+14 ta-ta              125
+15 tank                93
+```
+
+### Training
+
+Base checkpoint: D040 seed21 best checkpoint.
+
+Approximate configuration:
+
+```text
+epochs:        80
+imgsz:         960
+batch:         2
+optimizer:     AdamW
+lr0:           0.0005
+cosine LR:     enabled
+mosaic:        0.4
+degrees:       8
+translate:     0.08
+scale:         0.25
+fliplr:        0.5
+flipud:        0.15
+```
+
+### Local validation
+
+```text
+precision:  0.518
+recall:     0.712
+mAP50:      0.637
+mAP50-95:   0.498
+```
+
+Selected per-class mAP50:
+
+```text
+condor             0.995
+hangar             0.828
+helicopter         0.751
+jammer             0.816
+jet_plane          0.995
+large_launcher     0.111
+large_tower        0.694
+medium_launcher    0.995
+medium_plane       0.378
+mine_roller        0.895
+small_launcher     0.320
+small_plane        0.635
+small_tower        0.359
+spacecraft         0.599
+ta-ta              0.332
+tank                0.492
+```
+
+Interpretation: several important validation classes remained weak, especially `large_launcher`, `medium_plane`, `small_tower`, and `tank`.
+
+Decision: do not deploy D056A alone; test it conservatively as one ensemble member.
+
+---
+
+## EXP-D056B — D056A seed21 + original D040 seed7
+
+**Status:** REJECTED
+
+Configuration:
+
+```text
+seed21 -> D056A best.pt
+seed7  -> original D040 seed7
+CONFIDENCE = 0.001
+MODEL_NMS_IOU = 0.70
+ENSEMBLE_NMS_IOU = 0.65
+IMAGE_SIZE = 960
+D055B tracker
+tracker input >= 0.03
+MAX_MISSED_FRAMES = 3
+stable centered L1
+```
+
+Remote result:
+
+```text
+score:             0.1731394852
+received:          242/249
+missing:           7
+median latency:    44.4 ms
+max latency:       165.5 ms
+errors:            none
+final camera:      L1 (1920,1080)
+final detections:  85
+```
+
+Comparison:
+
+```text
+D055B best: 0.1802420600
+D056B:      0.1731394852
+delta:     -0.0071025748
+```
+
+Interpretation: technically healthy run but worse score; the 85 final-frame detections also suggested added noise.
+
+Decision: reject D056B and restore the original D040 seed21 + seed7 ensemble.
+
+---
+
+## EXP-D057A — Domain-matched synthetic fine-tuning
+
+**Status:** LOCALLY PROMISING / NOT FINAL
+
+Reference data recovered:
+
+- Helsinki images: 25
+- Helsinki annotations: 25
+- captured validation views: 230
+- hard-negative pool: 66
+
+Synthetic dataset:
+
+```text
+3000 synthetic images
+171 D048 real-domain images
+```
+
+Balanced pasted-object counts were roughly 500–585 per class across all 16 classes.
+
+Training from D040 seed21:
+
+```text
+Epoch 1: mAP50 0.633 | mAP50-95 0.441
+Epoch 2: mAP50 0.792 | mAP50-95 0.584
+Epoch 3: mAP50 0.906 | mAP50-95 0.675
+```
+
+Captured-validation comparison:
+
+```text
+threshold >= 0.03: D040 451, D057 632
+threshold >= 0.10: D040 316, D057 255
+threshold >= 0.30: D040 252, D057 101
+```
+
+D057 began predicting classes D040 rarely or never produced in the captured validation domain, but calibration shifted substantially.
+
+---
+
+## EXP-D057B — D057A seed21 + original D040 seed7
+
+**Status:** REJECTED
+
+Configuration:
+
+```text
+seed21: D057A
+seed7: original D040 seed7
+CONFIDENCE = 0.001
+tracker input >= 0.10
+stable centered L1
+```
+
+Remote result:
+
+```text
+score:             0.1712012003
+received:          244/249
+missing:           5
+median latency:    47.5 ms
+max latency:       145.1 ms
+errors:            none
+final detections:  63
+```
+
+Decision: reject D057B. Detector domain adaptation alone did not solve the remote bottleneck.
+
+---
+
+## EXP-D058A — Stale-safe active L1 camera sweep
+
+**Status:** BEST SINGLE VALIDATION SCORE / HIGH VARIANCE
+
+Kept the D040 ensemble and D055B tracker, but replaced the fixed camera with a stale-state-aware L1 tile pass followed by a continuous top-band L1 sweep. No L2 dives.
+
+Remote results:
+
+```text
+Run 1: 0.1867719026 | 232/249 | 17 missing | 46.2 ms median
+Run 2: 0.1684754147 | 222/249 | 27 missing | 44.9 ms median
+Run 3: 0.1501361835 | 216/249 | 33 missing | 80.6 ms median
+```
+
+Run 1 became the highest validation score achieved during the competition.
+
+Interpretation: active coverage helped, but performance was highly sensitive to skipped frames.
+
+---
+
+## EXP-D058B — Homography dead-reckoning + active L1 sweep
+
+**Status:** REJECTED FOR FINAL DEPLOYMENT
+
+Used the D058A camera with motion-aware global tracking based on the fitted homography:
+
+```text
+[ 1.006756  -0.001473  -12.614238 ]
+[ 0.000337   1.011899   51.706644 ]
+[ 0.0       -0.000001    1.0      ]
+```
+
+Remote results:
+
+```text
+Run 1: 0.1857364221 | 226/249 | 23 missing
+Run 2: 0.1817151839 | 234/249 | 15 missing
+```
+
+Interpretation: functional, but no reproducible gain over simpler D055B memory.
+
+Decision: restore D055B tracker.
+
+---
+
+## EXP-D059 — AWS Stockholm CPU deployment test
+
+**Status:** REJECTED
+
+AWS instance: `m7i-flex.large`, CPU-only.
+
+Single-model CPU benchmark at imgsz 960:
+
+```text
+mean: 90.7 ms
+min:  83.5 ms
+max:  95.3 ms
+```
+
+Exact D055B runtime was deployed to AWS.
+
+Remote result:
+
+```text
+score:             0.1561489533
+received:          216/249
+missing:           33
+median latency:    200.9 ms
+max latency:       227.9 ms
+errors:            none
+```
+
+Decision: reject AWS CPU deployment and return to the Windows GTX 1060 endpoint.
+
+---
+
+## Final pre-evaluation Windows confirmation
+
+Selected final runtime:
+
+```text
+D040 seed21 + seed7
+CONFIDENCE = 0.001
+MODEL_NMS_IOU = 0.70
+ENSEMBLE_NMS_IOU = 0.65
+D055B tracker
+tracker input >= 0.03
+EXP-D031 stable centered L1 camera
+Windows GTX 1060
+```
+
+Final validation before hidden evaluation:
+
+```text
+score:          0.1779861215
+received:       231/249
+missing:        18
+median latency: 47.1 ms
+max latency:    142.4 ms
+errors:         none
+```
+
+---
+
+# FINAL HIDDEN EVALUATION
+
+**Status:** COMPLETED
+
+Runtime used:
+
+```text
+D040 seed21 + seed7 ensemble
+CONFIDENCE = 0.001
+D055B temporal tracker
+tracker input >= 0.03
+stable centered L1 camera
+Windows GTX 1060 endpoint
+```
+
+Final result:
+
+```text
+score: 0.0181381435
+errors: none
+```
+
+Comparison:
+
+```text
+best public validation: 0.1867719026  (D058A)
+best stable D055B:      0.1802420600
+final hidden evaluation:0.0181381435
+```
+
+Interpretation: the endpoint remained operational, so the severe drop indicates a major generalization failure rather than a server crash.
+
+Likely contributors:
+
+1. camera coverage overfitting from fixed centered L1
+2. repeated validation-scene specialization
+3. detector domain shift
+4. choosing validation reproducibility over scene-independent coverage
+
+Main lesson:
+
+> Repeated validation can become a hidden form of training. A robust solution must optimize for scene-independent coverage, temporal geometry, and domain generalization rather than maximum performance on one repeatable validation sequence.
+
+---
+
+# Final experiment summary
+
+```text
+D055B stable temporal tracker:
+best = 0.1802420600
+
+D056 hard-negative/domain fine-tune:
+remote ensemble = 0.1731394852
+
+D057 synthetic-domain detector:
+local synthetic mAP50 = 0.906 after 3 epochs
+remote ensemble = 0.1712012003
+
+D058A stale-safe active L1 sweep:
+best = 0.1867719026
+
+D058B homography tracker + L1 sweep:
+best = 0.1857364221
+
+AWS CPU deployment:
+0.1561489533
+
+Final hidden evaluation:
+0.0181381435
+```
+
+## Best public validation configuration
+
+```text
+EXP-D058A
+score = 0.1867719026
+```
+
+## Most reproducible public validation configuration
+
+```text
+EXP-D055B
+~0.179–0.180
+```
+
+## Final hidden result
+
+```text
+0.0181381435
+```
+
+## Post-competition direction
+
+If rebuilding without competition time pressure, prioritize:
+
+1. scene-independent active camera coverage
+2. motion-aware global tracking
+3. online motion estimation instead of a fixed trajectory assumption
+4. much larger domain-randomized synthetic training
+5. strict separation between validation analysis and model-development data
+6. validation across multiple independently generated scenes
+7. confidence calibration on held-out domains
+8. GPU hosting geographically close to the evaluator
+9. camera-policy evaluation independent of detector training data
+10. experiment selection based on cross-scene robustness rather than one repeatable validation sequence
